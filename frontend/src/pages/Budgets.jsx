@@ -227,8 +227,40 @@ function seedDemoTxs() {
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-gray-50 py-8 px-4">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-[#f5f7fb]">
+      {/* TOP NAVBAR */}
+      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-slate-200">
+        <div className="container mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-xl bg-indigo-500 flex items-center justify-center text-white text-lg font-bold">
+              F
+            </div>
+            <span className="font-semibold text-slate-800 text-lg">FinFusion</span>
+          </div>
+
+          <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-500">
+            <a href="/" className="hover:text-slate-800 transition-colors">
+              Dashboard
+            </a>
+            <a href="/groups" className="hover:text-slate-800 transition-colors">
+              Groups
+            </a>
+            <a href="/budgets" className="text-indigo-600 border-b-2 border-indigo-500 pb-1">
+              Budgets
+            </a>
+            <a href="/forecast" className="hover:text-slate-800 transition-colors">
+              Forecast
+            </a>
+          </nav>
+
+          <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-indigo-400 to-purple-400 flex items-center justify-center text-white text-sm font-semibold">
+            Y
+          </div>
+        </div>
+      </header>
+
+      {/* MAIN CONTENT */}
+      <div className="py-8 px-4 max-w-6xl mx-auto">
         <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
           <div>
             <h1 className="text-3xl font-extrabold text-gray-900">Budgets</h1>
