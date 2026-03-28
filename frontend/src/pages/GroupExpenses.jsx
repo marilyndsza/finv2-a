@@ -257,12 +257,28 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
               <h3 className="text-sm font-medium mb-2">Your groups</h3>
               <ul className="space-y-2">
                 {groups.map((g) => (
-                  <li key={g.id} className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${g.id === selectedGroupId ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-gray-50'}`} onClick={() => setSelectedGroupId(g.id)}>
-                    <div>
+                  <li key={g.id} className={`flex items-center justify-between p-2 rounded-lg transition ${g.id === selectedGroupId ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-gray-50'}`}>
+                    <div className="flex-1 cursor-pointer" onClick={() => setSelectedGroupId(g.id)}>
                       <div className="text-sm font-semibold">{g.name}</div>
                       <div className="text-xs text-gray-400">{g.people.length} members • {g.expenses.length} expenses</div>
                     </div>
-                    <div className="text-gray-300 text-sm">›</div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Delete group "${g.name}"? This will remove all members and expenses.`)) {
+                            removeGroup(g.id);
+                          }
+                        }}
+                        className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition"
+                        title="Delete group"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                      <div className="text-gray-300 text-sm cursor-pointer" onClick={() => setSelectedGroupId(g.id)}>›</div>
+                    </div>
                   </li>
                 ))}
               </ul>
