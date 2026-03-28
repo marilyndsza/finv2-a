@@ -56,14 +56,24 @@ class DataStore:
             return []
         
         expenses = []
-        for _, row in cls.df_expenses.iterrows():
+        for idx, row in cls.df_expenses.iterrows():
+            # Generate ID if not present or is NaN
+            expense_id = row.get('id')
+            if pd.isna(expense_id):
+                expense_id = str(uuid.uuid4())
+            
+            # Get created_at or use current time
+            created_at = row.get('created_at')
+            if pd.isna(created_at):
+                created_at = datetime.now(timezone.utc).isoformat()
+            
             expense = {
-                'id': row.get('id', str(uuid.uuid4())),
+                'id': str(expense_id),
                 'amount': float(row['amount']),
-                'category': row.get('category', 'Other'),
-                'description': row.get('description', 'Expense'),
+                'category': str(row.get('category', 'Other')) if not pd.isna(row.get('category')) else 'Other',
+                'description': str(row.get('description', 'Expense')) if not pd.isna(row.get('description')) else 'Expense',
                 'date': str(row['date']),
-                'created_at': row.get('created_at', datetime.now(timezone.utc).isoformat())
+                'created_at': str(created_at)
             }
             expenses.append(expense)
         

@@ -244,7 +244,7 @@ export default function Dashboard() {
             className="text-3xl md:text-4xl font-bold mt-2 text-slate-900"
             data-testid="dashboard-title"
           >
-            Here&apos;s your financial overview for the month.
+            Here&apos;s your financial overview for {analytics?.metadata?.period_label || 'the month'}.
           </h1>
         </div>
 
