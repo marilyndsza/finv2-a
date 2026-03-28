@@ -100,7 +100,7 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
   ];
 
   const [groups, setGroups] = useState(initialGroups || sampleGroups);
-  const [selectedGroupId, setSelectedGroupId] = useState((initialGroups && initialGroups[0]?.id) || groups[0].id);
+  const [selectedGroupId, setSelectedGroupId] = useState((initialGroups && initialGroups[0]?.id) || groups[0]?.id || null);
 
   const [newGroupName, setNewGroupName] = useState('');
   const [newPersonName, setNewPersonName] = useState('');
@@ -114,9 +114,20 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
     if (onChange) onChange(groups);
   }, [groups]);
 
-  const currentGroup = useMemo(() => groups.find((g) => g.id === selectedGroupId) || groups[0], [groups, selectedGroupId]);
-  const groupBalances = useMemo(() => computeBalancesForGroup(currentGroup.people, currentGroup.expenses), [currentGroup]);
-  const groupTransactions = useMemo(() => simplifyDebts(groupBalances), [groupBalances]);
+  const currentGroup = useMemo(() => {
+    if (groups.length === 0) return null;
+    return groups.find((g) => g.id === selectedGroupId) || groups[0];
+  }, [groups, selectedGroupId]);
+  
+  const groupBalances = useMemo(() => {
+    if (!currentGroup) return {};
+    return computeBalancesForGroup(currentGroup.people, currentGroup.expenses);
+  }, [currentGroup]);
+  
+  const groupTransactions = useMemo(() => {
+    if (!currentGroup) return [];
+    return simplifyDebts(groupBalances);
+  }, [currentGroup, groupBalances]);
 
   const overall = useMemo(() => {
     const totalBalances = {};
@@ -142,7 +153,9 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
   function removeGroup(groupId) {
     const next = groups.filter((g) => g.id !== groupId);
     setGroups(next);
-    if (selectedGroupId === groupId && next.length) setSelectedGroupId(next[0].id);
+    if (selectedGroupId === groupId) {
+      setSelectedGroupId(next.length > 0 ? next[0].id : null);
+    }
   }
 
   function addPersonToCurrent(name) {
@@ -256,7 +269,8 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
             <div className="bg-white rounded-2xl p-4 shadow-md">
               <h3 className="text-sm font-medium mb-2">Your groups</h3>
               <ul className="space-y-2">
-                {groups.map((g) => (
+                {groups.length > 0 ? (
+                  groups.map((g) => (
                   <li key={g.id} className={`flex items-center justify-between p-2 rounded-lg transition ${g.id === selectedGroupId ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-gray-50'}`}>
                     <div className="flex-1 cursor-pointer" onClick={() => setSelectedGroupId(g.id)}>
                       <div className="text-sm font-semibold">{g.name}</div>
@@ -280,7 +294,12 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
                       <div className="text-gray-300 text-sm cursor-pointer" onClick={() => setSelectedGroupId(g.id)}>›</div>
                     </div>
                   </li>
-                ))}
+                ))
+                ) : (
+                  <li className="text-center py-4 text-sm text-gray-400">
+                    No groups yet. Create one below!
+                  </li>
+                )}
               </ul>
 
               <div className="mt-4">
@@ -292,7 +311,8 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
             <div className="mt-4 bg-white rounded-2xl p-4 shadow-md">
               <h4 className="text-sm font-medium mb-2">Overall balances</h4>
               <div className="grid grid-cols-1 gap-2">
-                {Object.entries(overall).slice(0, 6).map(([id, bal]) => (
+                {Object.entries(overall).length > 0 ? (
+                  Object.entries(overall).slice(0, 6).map(([id, bal]) => (
                   <div key={id} className="flex items-center justify-between p-2 rounded-lg border">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-sm font-semibold text-gray-700">{avatarInitials(nameOf(id))}</div>
@@ -300,13 +320,20 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
                     </div>
                     <div className={`font-semibold ${bal > 0 ? 'text-green-600' : 'text-orange-600'}`}>{bal > 0 ? `+₹${bal.toFixed(2)}` : `-₹${Math.abs(bal).toFixed(2)}`}</div>
                   </div>
-                ))}
+                ))
+                ) : (
+                  <div className="text-center py-4 text-xs text-gray-400">
+                    No balances to show
+                  </div>
+                )}
               </div>
             </div>
 
           </aside>
 
           <main className="col-span-3">
+            {currentGroup ? (
+              <>
             <div className="bg-white rounded-2xl p-5 shadow-lg mb-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -429,6 +456,32 @@ export default function SplitwiseModule({ primaryPersonId = null, initialGroups 
                 <button onClick={()=>addPersonToCurrent()} className="px-4 py-2 rounded-lg bg-indigo-600 text-white">Add</button>
               </div>
             </div>
+
+              </>
+            ) : (
+              <div className="bg-white rounded-2xl p-12 shadow-lg text-center">
+                <div className="max-w-md mx-auto">
+                  <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">No Groups Yet</h2>
+                  <p className="text-gray-500 mb-6">
+                    Create your first group to start tracking shared expenses with friends and family.
+                  </p>
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-4 text-left">
+                    <p className="text-sm text-indigo-900 font-medium mb-2">Get started by:</p>
+                    <ul className="text-sm text-indigo-700 space-y-1">
+                      <li>• Creating a group in the sidebar</li>
+                      <li>• Adding members to split expenses</li>
+                      <li>• Recording who paid for what</li>
+                      <li>• See who owes whom automatically</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
 
           </main>
         </div>
