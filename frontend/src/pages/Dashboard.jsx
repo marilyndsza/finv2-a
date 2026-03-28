@@ -206,13 +206,6 @@ export default function Dashboard() {
               Dashboard
             </Link>
             <Link
-              to="/groups"
-              className="hover:text-slate-800 transition-colors"
-              data-testid="nav-groups"
-            >
-              Groups
-            </Link>
-            <Link
               to="/budgets"
               className="hover:text-slate-800 transition-colors"
               data-testid="nav-budgets"
@@ -225,6 +218,13 @@ export default function Dashboard() {
               data-testid="nav-forecast"
             >
               Forecast
+            </Link>
+            <Link
+              to="/groups"
+              className="hover:text-slate-800 transition-colors"
+              data-testid="nav-groups"
+            >
+              Groups
             </Link>
           </nav>
 

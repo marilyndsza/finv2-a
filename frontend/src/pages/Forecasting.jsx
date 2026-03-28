@@ -88,14 +88,14 @@ export default function Forecasting() {
             <a href="/" className="hover:text-slate-800 transition-colors">
               Dashboard
             </a>
-            <a href="/groups" className="hover:text-slate-800 transition-colors">
-              Groups
-            </a>
             <a href="/budgets" className="hover:text-slate-800 transition-colors">
               Budgets
             </a>
             <a href="/forecast" className="text-indigo-600 border-b-2 border-indigo-500 pb-1">
               Forecast
+            </a>
+            <a href="/groups" className="hover:text-slate-800 transition-colors">
+              Groups
             </a>
           </nav>
 
