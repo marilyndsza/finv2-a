@@ -511,13 +511,22 @@ async def get_anomalies():
             anomalies = []
             
             for _, row in df.iterrows():
-                z_score = abs((row['amount'] - mean_amount) / std_amount) if std_amount > 0 else 0
+                # Ensure amount is a valid number
+                amount = row['amount']
+                if not np.isfinite(amount):
+                    continue
+                    
+                z_score = abs((amount - mean_amount) / std_amount) if std_amount > 0 else 0
+                
+                # Handle NaN or infinite values
+                if not np.isfinite(z_score):
+                    z_score = 0
                 
                 if z_score > threshold:
                     severity = "high" if z_score > 4 else "medium" if z_score > 3.5 else "low"
                     anomalies.append({
                         "expense_id": row.get('id', str(uuid.uuid4())),
-                        "amount": float(row['amount']),
+                        "amount": float(amount),
                         "category": row.get('category', 'Other'),
                         "date": str(row['date']),
                         "reason": "unusual_amount",
