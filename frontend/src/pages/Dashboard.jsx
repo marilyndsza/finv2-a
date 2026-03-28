@@ -68,8 +68,10 @@ export default function Dashboard() {
   const [suggestions, setSuggestions] = useState([]);
   const [analytics, setAnalytics] = useState({
     total_monthly: 0,
-    by_category: []
+    by_category: [],
+    metadata: {}
   });
+  const [budgets, setBudgets] = useState([]);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -86,16 +88,18 @@ export default function Dashboard() {
 
   async function loadData() {
     try {
-      const [exp, sugg, an, anomalies] = await Promise.all([
+      const [exp, sugg, an, anomalies, budg] = await Promise.all([
         api.getExpenses(),
         api.getSuggestions(),
         api.getAnalyticsSpending(),
-        api.getAnomalies()
+        api.getAnomalies(),
+        api.getBudgets()
       ]);
 
       setExpenses(Array.isArray(exp) ? exp : []);
       setSuggestions(sugg?.suggestions || []);
-      setAnalytics(an || { total_monthly: 0, by_category: [] });
+      setAnalytics(an || { total_monthly: 0, by_category: [], metadata: {} });
+      setBudgets(Array.isArray(budg) ? budg : []);
       
       // Show anomaly warnings if detected
       if (anomalies?.count > 0) {
@@ -501,7 +505,7 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* BOTTOM GRID: RECENT EXPENSES + AI SUGGESTIONS */}
+        {/* BOTTOM GRID: RECENT EXPENSES + BUDGETS + AI SUGGESTIONS */}
         <div className="grid grid-cols-1 lg:grid-cols-[2fr,1.1fr] gap-8 mt-10">
           {/* RECENT EXPENSES */}
           <Card
@@ -604,6 +608,97 @@ export default function Dashboard() {
                 onChange={handleReceiptUpload}
               />
             </div>
+          </Card>
+
+          {/* BUDGETS & TRACKING */}
+          <Card
+            className="rounded-[24px] border-0 shadow-sm bg-white p-6"
+            data-testid="budgets-card"
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-500">
+                <Target className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  Budget Tracking
+                </p>
+                <p className="text-xs text-slate-400">
+                  {analytics?.metadata?.period_label || 'This month'}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {budgets && budgets.length > 0 ? (
+                budgets.map((budget, idx) => {
+                  const percentage = budget.percentage || 0;
+                  const isOverBudget = percentage > 100;
+                  const isWarning = percentage >= 70 && percentage <= 100;
+                  
+                  let barColor = 'bg-emerald-500';
+                  let textColor = 'text-emerald-600';
+                  let bgColor = 'bg-emerald-50';
+                  
+                  if (isOverBudget) {
+                    barColor = 'bg-red-500';
+                    textColor = 'text-red-600';
+                    bgColor = 'bg-red-50';
+                  } else if (isWarning) {
+                    barColor = 'bg-amber-500';
+                    textColor = 'text-amber-600';
+                    bgColor = 'bg-amber-50';
+                  }
+                  
+                  return (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-[16px] ${bgColor}`}
+                      data-testid={`budget-${budget.category}`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-slate-700">
+                          {budget.category}
+                        </span>
+                        <span className={`text-xs font-bold ${textColor}`}>
+                          {percentage.toFixed(0)}%
+                          {isOverBudget && ' 🔥'}
+                        </span>
+                      </div>
+                      
+                      <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-full ${barColor} transition-all duration-300 rounded-full`}
+                          style={{ width: `${Math.min(percentage, 100)}%` }}
+                        />
+                      </div>
+                      
+                      <div className="flex items-center justify-between mt-2 text-[11px] text-slate-500">
+                        <span>₹{budget.current?.toFixed(0) || 0}</span>
+                        <span>of ₹{budget.limit?.toFixed(0) || 0}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-6">
+                  <p className="text-xs text-slate-400">
+                    No budget data available
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {budgets && budgets.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <a 
+                  href="/budgets" 
+                  className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold"
+                >
+                  Manage budgets →
+                </a>
+              </div>
+            )}
           </Card>
 
           {/* AI SUGGESTIONS */}

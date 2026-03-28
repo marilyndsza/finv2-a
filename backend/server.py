@@ -135,16 +135,31 @@ class Budget(BaseModel):
 
 # ==================== Helper Functions ====================
 
-def get_category_spending(days: int = 30) -> List[Dict]:
-    """Calculate spending by category for last N days."""
+def get_latest_month_from_dataset() -> str:
+    """Get the latest month available in the dataset."""
+    if DataStore.df_expenses is None or DataStore.df_expenses.empty:
+        return datetime.now(timezone.utc).strftime("%Y-%m")
+    
+    # Get the latest date from dataset
+    latest_date = pd.to_datetime(DataStore.df_expenses['date']).max()
+    return latest_date.strftime("%Y-%m")
+
+def get_category_spending(days: int = 30, use_latest_month: bool = True) -> List[Dict]:
+    """Calculate spending by category for last N days or latest month in dataset."""
     if DataStore.df_expenses is None or DataStore.df_expenses.empty:
         return []
     
-    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-    
-    # Filter by date
     df = DataStore.df_expenses.copy()
-    df = df[df['date'] >= cutoff_date]
+    
+    if use_latest_month:
+        # Use latest month from dataset instead of current date
+        latest_month = get_latest_month_from_dataset()
+        df['date_parsed'] = pd.to_datetime(df['date'])
+        df = df[df['date_parsed'].dt.strftime("%Y-%m") == latest_month]
+    else:
+        # Use last N days from current date (original logic)
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        df = df[df['date'] >= cutoff_date]
     
     # Group by category
     category_totals = df.groupby('category')['amount'].sum().to_dict()
@@ -306,17 +321,31 @@ async def delete_expense(expense_id: str):
 
 @api_router.get("/analytics/spending")
 async def analytics_spending():
-    """Get spending analytics."""
-    cs = get_category_spending(days=30)
+    """Get spending analytics for latest available month."""
+    cs = get_category_spending(days=30, use_latest_month=True)
     total = sum(item['amount'] for item in cs)
+    
+    # Get latest month info
+    latest_month = get_latest_month_from_dataset()
+    month_start = f"{latest_month}-01"
+    
+    # Calculate month end
+    if DataStore.df_expenses is not None and not DataStore.df_expenses.empty:
+        df = DataStore.df_expenses.copy()
+        df['date_parsed'] = pd.to_datetime(df['date'])
+        month_data = df[df['date_parsed'].dt.strftime("%Y-%m") == latest_month]
+        month_end = month_data['date'].max() if not month_data.empty else month_start
+    else:
+        month_end = month_start
     
     return {
         "total_monthly": round(total, 2),
         "by_category": cs,
         "error": None,
         "metadata": {
-            "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
-            "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "period_start": month_start,
+            "period_end": month_end,
+            "period_label": latest_month,
             "transaction_count": len(DataStore.df_expenses) if DataStore.df_expenses is not None else 0
         }
     }
@@ -351,46 +380,60 @@ async def forecast_lstm():
 @api_router.get("/budget/smart")
 async def get_smart_budget():
     """
-    Generate smart budget with AI predictions.
+    Auto-generate smart budgets based on spending patterns.
     Returns consistent schema with fallback support.
     """
-    cs = get_category_spending(days=30)
+    # Use latest month for budget calculation
+    cs = get_category_spending(days=30, use_latest_month=True)
     
     if not cs:
         return {
             "budget": [],
             "total": 0,
+            "current_spending": [],
             "fallback": True,
             "error": "No spending data available",
             "metadata": {"method": "none", "period": "monthly", "confidence": 0.0}
         }
     
-    # Generate budgets (using historical + buffer for now)
+    # Auto-generate budgets: average spending * 1.1 (10% buffer)
     budgets = []
     total_budget = 0
+    current_spending = []
     
     for item in cs:
-        # Add 15% buffer (fallback method)
-        limit = round(item['amount'] * 1.15, 2)
+        # Set budget = current average * 1.1 (10% buffer)
+        limit = round(item['amount'] * 1.1, 2)
+        current = round(item['amount'], 2)
+        
         budgets.append({
             "category": item['category'],
             "limit": limit,
+            "current": current,
+            "percentage": round((current / limit * 100) if limit > 0 else 0, 1),
             "basis": "historical_average",
-            "buffer_percent": 15
+            "buffer_percent": 10
         })
+        
+        current_spending.append({
+            "category": item['category'],
+            "amount": current
+        })
+        
         total_budget += limit
     
-    method = "lstm_based" if DataStore.lstm_trained else "historical_average"
+    method = "lstm_based" if DataStore.lstm_trained else "auto_generated"
     
     return {
         "budget": budgets,
         "total": round(total_budget, 2),
+        "current_spending": current_spending,
         "fallback": not DataStore.lstm_trained,
-        "error": "LSTM not trained, using historical average + 15% buffer" if not DataStore.lstm_trained else None,
+        "error": "Auto-generated from spending patterns (avg × 1.1)" if not DataStore.lstm_trained else None,
         "metadata": {
             "method": method,
             "period": "monthly",
-            "confidence": 0.85 if DataStore.lstm_trained else 0.55
+            "confidence": 0.85 if DataStore.lstm_trained else 0.65
         }
     }
 
