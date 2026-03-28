@@ -176,10 +176,11 @@ export default function Dashboard() {
     }
   }
 
-  // Dummy values for cards not backed by API (just for design)
-  const totalIncome = analytics.total_monthly * 2 || 5800;
-  const savingsRate = 0.23;
-  const budgetRemaining = analytics.total_monthly * 0.5 || 1250;
+  // Calculate real values from actual data
+  const totalSpent = analytics.total_monthly || 0;
+  const totalBudget = budgets.reduce((sum, b) => sum + (b.limit || 0), 0);
+  const budgetRemaining = Math.max(0, totalBudget - totalSpent);
+  const budgetUsedPercent = totalBudget > 0 ? (totalSpent / totalBudget * 100) : 0;
   const hasMultipleCategories = analytics?.by_category?.length > 1;
 
   return (
@@ -387,36 +388,37 @@ export default function Dashboard() {
 
             {/* 3 SMALL SUMMARY CARDS */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Income */}
+              {/* Total Spent */}
               <Card className="rounded-[20px] border-0 shadow-sm bg-white px-6 py-6 h-[170px] flex flex-col justify-between">
 
                 <div>
                   <p className="text-xs text-slate-400 font-semibold uppercase">
-                    Total Income
+                    Total Spent
                   </p>
                   <p className="text-2xl font-semibold mt-2 text-slate-900">
-                    {formatCurrency(totalIncome)}
+                    {formatCurrency(totalSpent)}
                   </p>
                 </div>
-                <p className="text-xs text-emerald-500 mt-2 flex items-center gap-1">
-                  <TrendingUp className="w-3 h-3" />
-                  +2.1%
+                <p className="text-xs text-slate-500 mt-2">
+                  {analytics?.metadata?.period_label || 'This period'}
                 </p>
               </Card>
 
-              {/* Savings Rate */}
+              {/* Budget Status */}
               <Card className="rounded-[20px] border-0 shadow-sm bg-white px-6 py-6 h-[170px] flex flex-col justify-between">
 
 
                 <div>
                   <p className="text-xs text-slate-400 font-semibold uppercase">
-                    Savings Rate
+                    Budget Used
                   </p>
                   <p className="text-2xl font-semibold mt-2 text-slate-900">
-                    {(savingsRate * 100).toFixed(0)}%
+                    {budgetUsedPercent.toFixed(0)}%
                   </p>
                 </div>
-                <p className="text-xs text-emerald-500 mt-2">+1.5%</p>
+                <p className={`text-xs mt-2 ${budgetUsedPercent > 90 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                  {budgetUsedPercent > 90 ? '⚠️ High usage' : '✓ On track'}
+                </p>
               </Card>
 
               {/* Budget Remaining */}
@@ -431,7 +433,9 @@ export default function Dashboard() {
                     {formatCurrency(budgetRemaining)}
                   </p>
                 </div>
-                <p className="text-xs text-rose-500 mt-2">-5.0%</p>
+                <p className="text-xs text-slate-500 mt-2">
+                  of ₹{totalBudget.toFixed(0)} total
+                </p>
               </Card>
             </div>
           </div>

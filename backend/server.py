@@ -177,48 +177,83 @@ def get_category_spending(days: int = 30, use_latest_month: bool = True) -> List
     return [{"category": k, "amount": float(v)} for k, v in category_totals.items()]
 
 def get_ai_suggestions() -> List[str]:
-    """Generate AI suggestions based on spending patterns."""
+    """Generate human-readable AI suggestions based on spending patterns."""
     if DataStore.df_expenses is None or DataStore.df_expenses.empty:
-        return ["Start tracking expenses to get personalized suggestions!"]
+        return ["Start tracking your expenses to get personalized insights!"]
     
     try:
-        df = DataStore.df_expenses
+        df = DataStore.df_expenses.copy()
         suggestions = []
         
-        # Category analysis
-        category_spending = df.groupby('category')['amount'].sum().to_dict()
-        if category_spending:
-            highest_cat = max(category_spending.items(), key=lambda x: x[1])
-            suggestions.append(
-                f"Your highest spending is in {highest_cat[0]} (₹{highest_cat[1]:.2f}). Consider setting a limit."
-            )
+        # Use latest month data for analysis
+        latest_month = get_latest_month_from_dataset()
+        df['date_parsed'] = pd.to_datetime(df['date'])
+        current_month_df = df[df['date_parsed'].dt.strftime("%Y-%m") == latest_month]
         
-        # Small purchases
-        small_purchases = df[df['amount'] < 200]
-        if len(small_purchases) > 10:
+        if current_month_df.empty:
+            return ["Add more expenses to get personalized suggestions!"]
+        
+        # 1. Highest spending category
+        category_spending = current_month_df.groupby('category')['amount'].sum().sort_values(ascending=False)
+        if len(category_spending) > 0:
+            top_cat = category_spending.index[0]
+            top_amount = category_spending.iloc[0]
+            total = category_spending.sum()
+            percentage = (top_amount / total * 100) if total > 0 else 0
+            
+            if percentage > 40:
+                suggestions.append(
+                    f"💰 {top_cat} takes up {percentage:.0f}% of your budget. Consider alternatives to reduce this."
+                )
+            else:
+                suggestions.append(
+                    f"📊 You're spending most on {top_cat} (₹{top_amount:.0f}). Track it closely to stay within budget."
+                )
+        
+        # 2. Small frequent purchases analysis
+        small_purchases = current_month_df[current_month_df['amount'] < 500]
+        if len(small_purchases) >= 5:
             total_small = small_purchases['amount'].sum()
+            avg_small = total_small / len(small_purchases)
             suggestions.append(
-                f"You have {len(small_purchases)} small purchases totaling ₹{total_small:.2f}. These add up quickly!"
+                f"☕ You made {len(small_purchases)} small purchases averaging ₹{avg_small:.0f}. These add up to ₹{total_small:.0f}!"
             )
         
-        # Average daily spend
-        if 'date' in df.columns:
-            unique_days = df['date'].nunique()
-            total_spending = df['amount'].sum()
-            avg_daily = total_spending / max(unique_days, 1)
+        # 3. Large single expenses
+        large_purchases = current_month_df[current_month_df['amount'] > 1000]
+        if len(large_purchases) > 0:
+            largest = large_purchases['amount'].max()
+            largest_cat = large_purchases[large_purchases['amount'] == largest]['category'].iloc[0]
             suggestions.append(
-                f"Your average daily spend is ₹{avg_daily:.0f}. A daily cap can help rein it in."
+                f"🎯 Your biggest expense was ₹{largest:.0f} on {largest_cat}. Plan ahead for big purchases to avoid budget stress."
             )
         
-        return suggestions[:4]
+        # 4. Spending trend
+        total_spending = current_month_df['amount'].sum()
+        num_days = current_month_df['date'].nunique()
+        daily_avg = total_spending / max(num_days, 1)
+        
+        if daily_avg > 500:
+            suggestions.append(
+                f"📈 You're spending about ₹{daily_avg:.0f} per day. Setting a daily limit of ₹{daily_avg * 0.9:.0f} could help you save."
+            )
+        
+        # 5. Category diversity suggestion
+        if len(category_spending) <= 2:
+            suggestions.append(
+                f"💡 Tip: Track expenses in more categories for better insights into your spending habits."
+            )
+        
+        # Return top 5 suggestions
+        return suggestions[:5]
     
     except Exception as e:
         logger.error(f"AI suggestions error: {e}")
         return [
-            "Track your daily expenses to identify spending patterns.",
-            "Review subscriptions and cancel unused ones.",
-            "Cook at home more often to reduce food costs.",
-            "Set specific budget limits per category."
+            "💡 Review your spending weekly to spot patterns",
+            "🎯 Set category-wise budgets to control spending",
+            "📱 Check your subscriptions - cancel what you don't use",
+            "🏠 Cook at home more often to save on food costs"
         ]
 
 def generate_simple_forecast(days_ahead: int = 30) -> Dict:
