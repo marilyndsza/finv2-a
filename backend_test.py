@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Backend API Testing for FinFusion Personal Finance App
-Tests all API endpoints to ensure they're working correctly.
+Backend API Testing for FinFusion Personal Finance App v2.0
+Tests all API endpoints with new {data, metadata, error} response format.
+Validates data-driven insights with no hardcoded text.
 """
 
 import requests
@@ -74,23 +75,40 @@ class FinFusionAPITester:
             self.log_test(name, False, f"Unexpected error: {str(e)}")
             return False, {}
 
-    def validate_health_response(self, data):
-        """Validate health endpoint response"""
-        if not isinstance(data, dict):
+    def validate_health_response(self, response):
+        """Validate health endpoint response - new {data, metadata, error} format"""
+        if not isinstance(response, dict):
             return False, "Response is not a dictionary"
         
+        if 'data' not in response:
+            return False, "Missing 'data' field in response"
+        
+        if 'metadata' not in response:
+            return False, "Missing 'metadata' field in response"
+        
+        if 'error' not in response:
+            return False, "Missing 'error' field in response"
+        
+        data = response['data']
         if not data.get('ok'):
             return False, "Health check failed - ok is not True"
         
         if not data.get('data_loaded'):
             return False, "Data not loaded - data_loaded is not True"
         
-        return True, "Health check passed"
+        return True, f"Health check passed - {data.get('expenses_count', 0)} expenses loaded"
 
-    def validate_expenses_response(self, data):
-        """Validate expenses endpoint response"""
+    def validate_expenses_response(self, response):
+        """Validate expenses endpoint response - new {data, metadata, error} format"""
+        if not isinstance(response, dict):
+            return False, "Response is not a dictionary"
+        
+        if 'data' not in response:
+            return False, "Missing 'data' field in response"
+        
+        data = response['data']
         if not isinstance(data, list):
-            return False, "Response is not a list"
+            return False, "Data is not a list"
         
         if len(data) == 0:
             return False, "No expenses found in response"
@@ -104,11 +122,15 @@ class FinFusionAPITester:
         
         return True, f"Found {len(data)} expenses"
 
-    def validate_analytics_response(self, data):
-        """Validate analytics spending endpoint response"""
-        if not isinstance(data, dict):
+    def validate_analytics_response(self, response):
+        """Validate analytics spending endpoint response - new format"""
+        if not isinstance(response, dict):
             return False, "Response is not a dictionary"
         
+        if 'data' not in response:
+            return False, "Missing 'data' field in response"
+        
+        data = response['data']
         if 'total_monthly' not in data:
             return False, "Missing total_monthly field"
         
@@ -118,27 +140,57 @@ class FinFusionAPITester:
         if not isinstance(data['by_category'], list):
             return False, "by_category is not a list"
         
-        return True, f"Analytics data with total: {data['total_monthly']}"
+        # Check for comparison data (month-over-month)
+        comparison = data.get('comparison')
+        if comparison:
+            required_comparison_fields = ['previous_total', 'delta', 'delta_pct', 'direction']
+            for field in required_comparison_fields:
+                if field not in comparison:
+                    return False, f"Missing comparison field: {field}"
+        
+        return True, f"Analytics data with total: {data['total_monthly']}, comparison: {comparison is not None}"
 
-    def validate_suggestions_response(self, data):
-        """Validate suggestions endpoint response"""
-        if not isinstance(data, dict):
+    def validate_suggestions_response(self, response):
+        """Validate suggestions endpoint response - new format with data-driven insights"""
+        if not isinstance(response, dict):
             return False, "Response is not a dictionary"
         
-        if 'suggestions' not in data:
-            return False, "Missing suggestions field"
+        if 'data' not in response:
+            return False, "Missing 'data' field in response"
         
-        if not isinstance(data['suggestions'], list):
-            return False, "suggestions is not a list"
+        data = response['data']
+        if not isinstance(data, list):
+            return False, "Data is not a list"
         
-        return True, f"Found {len(data['suggestions'])} suggestions"
+        # Check insight structure and validate no hardcoded text
+        for i, insight in enumerate(data):
+            required_fields = ['type', 'metric', 'message', 'value', 'confidence']
+            for field in required_fields:
+                if field not in insight:
+                    return False, f"Insight {i} missing required field: {field}"
+            
+            # Validate insight types
+            valid_types = ['month_comparison', 'top_category', 'spending_spike', 'trend', 'forecast', 'daily_spending', 'category_comparison', 'concentration']
+            if insight['type'] not in valid_types:
+                return False, f"Invalid insight type: {insight['type']}"
+            
+            # Check that message contains numeric values (no static text like "you saved 5%")
+            message = insight['message']
+            if not any(char.isdigit() for char in message):
+                return False, f"Insight message lacks numeric values: {message}"
+        
+        return True, f"Found {len(data)} data-driven insights"
 
-    def validate_forecast_response(self, data):
-        """Validate forecast LSTM endpoint response"""
-        if not isinstance(data, dict):
+    def validate_forecast_response(self, response):
+        """Validate forecast LSTM endpoint response - new format"""
+        if not isinstance(response, dict):
             return False, "Response is not a dictionary"
         
-        required_fields = ['forecast', 'trend', 'confidence', 'fallback']
+        if 'data' not in response:
+            return False, "Missing 'data' field in response"
+        
+        data = response['data']
+        required_fields = ['forecast', 'total_predicted', 'trend', 'slope_per_day', 'avg_daily_30d']
         for field in required_fields:
             if field not in data:
                 return False, f"Missing required field: {field}"
@@ -146,14 +198,29 @@ class FinFusionAPITester:
         if not isinstance(data['forecast'], list):
             return False, "forecast is not a list"
         
-        return True, f"Forecast with {len(data['forecast'])} data points, trend: {data['trend']}"
+        # Check metadata for method labeling
+        metadata = response.get('metadata', {})
+        if 'method_label' not in metadata:
+            return False, "Missing method_label in metadata"
+        
+        if 'is_ml_model' not in metadata:
+            return False, "Missing is_ml_model in metadata"
+        
+        if 'confidence' not in metadata:
+            return False, "Missing confidence in metadata"
+        
+        return True, f"Forecast with {len(data['forecast'])} points, trend: {data['trend']}, method: {metadata['method_label']}, ML: {metadata['is_ml_model']}"
 
-    def validate_budget_response(self, data):
-        """Validate smart budget endpoint response"""
-        if not isinstance(data, dict):
+    def validate_budget_response(self, response):
+        """Validate smart budget endpoint response - new format"""
+        if not isinstance(response, dict):
             return False, "Response is not a dictionary"
         
-        required_fields = ['budget', 'total', 'current_spending', 'fallback']
+        if 'data' not in response:
+            return False, "Missing 'data' field in response"
+        
+        data = response['data']
+        required_fields = ['budget', 'total']
         for field in required_fields:
             if field not in data:
                 return False, f"Missing required field: {field}"
@@ -161,14 +228,34 @@ class FinFusionAPITester:
         if not isinstance(data['budget'], list):
             return False, "budget is not a list"
         
-        return True, f"Budget with {len(data['budget'])} categories, total: {data['total']}"
+        # Check budget item structure
+        if len(data['budget']) > 0:
+            budget_item = data['budget'][0]
+            required_budget_fields = ['category', 'limit', 'current', 'percentage', 'hist_mean', 'hist_std', 'months_of_data']
+            for field in required_budget_fields:
+                if field not in budget_item:
+                    return False, f"Missing budget field: {field}"
+        
+        # Check metadata for method labeling
+        metadata = response.get('metadata', {})
+        if 'method_label' not in metadata:
+            return False, "Missing method_label in metadata"
+        
+        if 'is_ml_model' not in metadata:
+            return False, "Missing is_ml_model in metadata"
+        
+        return True, f"Budget with {len(data['budget'])} categories, total: {data['total']}, method: {metadata['method_label']}"
 
-    def validate_anomalies_response(self, data):
-        """Validate anomalies endpoint response"""
-        if not isinstance(data, dict):
+    def validate_anomalies_response(self, response):
+        """Validate anomalies endpoint response - new format"""
+        if not isinstance(response, dict):
             return False, "Response is not a dictionary"
         
-        required_fields = ['alerts', 'count', 'fallback']
+        if 'data' not in response:
+            return False, "Missing 'data' field in response"
+        
+        data = response['data']
+        required_fields = ['alerts', 'summary']
         for field in required_fields:
             if field not in data:
                 return False, f"Missing required field: {field}"
@@ -176,7 +263,22 @@ class FinFusionAPITester:
         if not isinstance(data['alerts'], list):
             return False, "alerts is not a list"
         
-        return True, f"Anomaly detection with {data['count']} alerts"
+        # Check alert structure
+        if len(data['alerts']) > 0:
+            alert = data['alerts'][0]
+            required_alert_fields = ['amount', 'z_score', 'severity']
+            for field in required_alert_fields:
+                if field not in alert:
+                    return False, f"Missing alert field: {field}"
+        
+        # Check metadata
+        metadata = response.get('metadata', {})
+        required_meta_fields = ['method', 'threshold', 'mean', 'std']
+        for field in required_meta_fields:
+            if field not in metadata:
+                return False, f"Missing metadata field: {field}"
+        
+        return True, f"Anomaly detection with {len(data['alerts'])} alerts, method: {metadata['method']}"
 
     def test_create_expense(self):
         """Test creating a new expense"""

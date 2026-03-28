@@ -88,7 +88,7 @@ export default function Budgets() {
             Budget Management
           </h1>
           <p className="text-slate-500 mt-2">
-            Track your spending against budget limits - {analytics?.metadata?.period_label || 'Current period'}
+            Track your spending against budget limits — {analytics?.metadata?.current_period || 'Current period'}
           </p>
         </div>
 
@@ -109,11 +109,11 @@ export default function Budgets() {
           </Card>
         </div>
 
-        {/* Info Alert */}
+        {/* Info Alert — data-driven label from backend */}
         <Alert className="mb-6 border-blue-200 bg-blue-50">
           <AlertCircle className="h-4 w-4 text-blue-600" />
           <AlertDescription className="text-blue-800">
-            <strong>Auto-generated budgets:</strong> Budgets are automatically calculated based on your spending patterns (average × 1.1 buffer)
+            <strong>Budget method:</strong> Limit = historical monthly average + 1 standard deviation. Based on {budgets[0]?.months_of_data || 0}+ months of data per category.
           </AlertDescription>
         </Alert>
 
@@ -156,7 +156,7 @@ export default function Budgets() {
                     />
                   </div>
 
-                  {/* Details */}
+                  {/* Details — show statistical basis */}
                   <div className={`mt-4 p-3 rounded-lg ${colors.bg}`}>
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
@@ -166,10 +166,9 @@ export default function Budgets() {
                         </p>
                       </div>
                       <div>
-                        <p className="text-slate-600">Over/Under</p>
+                        <p className="text-slate-600">Hist. mean / std</p>
                         <p className={`font-semibold ${colors.text}`}>
-                          {percentage > 100 ? '+' : ''}
-                          ₹{((budget.current || 0) - (budget.limit || 0)).toFixed(2)}
+                          ₹{budget.hist_mean?.toFixed(0) || '—'} / ₹{budget.hist_std?.toFixed(0) || '—'}
                         </p>
                       </div>
                     </div>
@@ -191,8 +190,7 @@ export default function Budgets() {
         {budgets.length > 0 && (
           <div className="mt-8 p-4 bg-slate-50 rounded-lg">
             <p className="text-sm text-slate-600">
-              💡 <strong>Tip:</strong> These budgets are auto-generated based on your spending patterns. 
-              Add more expenses from the Dashboard to improve accuracy.
+              Budget = historical monthly mean + 1 std deviation. Computed from {budgets[0]?.months_of_data || 0}+ months of transaction data per category.
             </p>
           </div>
         )}

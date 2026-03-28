@@ -1,5 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
@@ -8,112 +7,104 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import pandas as pd
-import numpy as np
 
 # Load environment variables
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# Import data loader
+# Imports
 from data.loader import DatasetLoader
+from services.insights_engine import InsightsEngine
 
-# Configure logging
+# Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# ==================== Global Data Store ====================
+
+# ==================== Data Store ====================
 
 class DataStore:
-    """In-memory data store for dataset and models."""
-    # Data
+    """In-memory data store."""
     df_expenses: Optional[pd.DataFrame] = None
     df_aggregated: Optional[pd.DataFrame] = None
     scaler = None
     loader: Optional[DatasetLoader] = None
-    
-    # Models (will be populated by model training)
-    lstm_model = None
-    anomaly_model = None
-    
-    # Training status flags
     data_loaded: bool = False
-    lstm_trained: bool = False
-    anomaly_trained: bool = False
-    
-    # Validation thresholds
-    min_rows_lstm: int = int(os.getenv('MIN_ROWS_FOR_LSTM', 14))
-    min_rows_anomaly: int = int(os.getenv('MIN_ROWS_FOR_ANOMALY', 50))
-    
+
+    @classmethod
+    def engine(cls) -> InsightsEngine:
+        """Return a fresh InsightsEngine wired to current data."""
+        return InsightsEngine(cls.df_expenses, cls.df_aggregated)
+
     @classmethod
     def get_expenses_list(cls) -> List[Dict]:
-        """Convert DataFrame to list of expense dictionaries."""
         if cls.df_expenses is None or cls.df_expenses.empty:
             return []
-        
         expenses = []
-        for idx, row in cls.df_expenses.iterrows():
-            # Generate ID if not present or is NaN
-            expense_id = row.get('id')
-            if pd.isna(expense_id):
-                expense_id = str(uuid.uuid4())
-            
-            # Get created_at or use current time
-            created_at = row.get('created_at')
-            if pd.isna(created_at):
-                created_at = datetime.now(timezone.utc).isoformat()
-            
-            expense = {
-                'id': str(expense_id),
+        for _, row in cls.df_expenses.iterrows():
+            eid = row.get('id')
+            if pd.isna(eid) if isinstance(eid, float) else not eid:
+                eid = str(uuid.uuid4())
+            cat = row.get('created_at')
+            if pd.isna(cat) if isinstance(cat, float) else not cat:
+                cat = datetime.now(timezone.utc).isoformat()
+            expenses.append({
+                'id': str(eid),
                 'amount': float(row['amount']),
-                'category': str(row.get('category', 'Other')) if not pd.isna(row.get('category')) else 'Other',
-                'description': str(row.get('description', 'Expense')) if not pd.isna(row.get('description')) else 'Expense',
+                'category': str(row.get('category', 'Other')) if not (isinstance(row.get('category'), float) and pd.isna(row.get('category'))) else 'Other',
+                'description': str(row.get('description', 'Expense')) if not (isinstance(row.get('description'), float) and pd.isna(row.get('description'))) else 'Expense',
                 'date': str(row['date']),
-                'created_at': str(created_at)
-            }
-            expenses.append(expense)
-        
+                'created_at': str(cat),
+            })
         return expenses
-    
+
     @classmethod
-    def add_expense(cls, expense_data: Dict) -> Dict:
-        """Add new expense to DataFrame."""
+    def add_expense(cls, data: Dict) -> Dict:
         if cls.df_expenses is None:
-            return expense_data
-        
-        # Add ID if not present
-        if 'id' not in expense_data:
-            expense_data['id'] = str(uuid.uuid4())
-        
-        # Add created_at if not present
-        if 'created_at' not in expense_data:
-            expense_data['created_at'] = datetime.now(timezone.utc).isoformat()
-        
-        # Convert to DataFrame row and append
-        new_row = pd.DataFrame([expense_data])
-        cls.df_expenses = pd.concat([cls.df_expenses, new_row], ignore_index=True)
-        
-        return expense_data
-    
+            return data
+        if 'id' not in data:
+            data['id'] = str(uuid.uuid4())
+        if 'created_at' not in data:
+            data['created_at'] = datetime.now(timezone.utc).isoformat()
+        cls.df_expenses = pd.concat([cls.df_expenses, pd.DataFrame([data])], ignore_index=True)
+        # Rebuild aggregated
+        cls._rebuild_aggregated()
+        return data
+
     @classmethod
     def delete_expense(cls, expense_id: str) -> bool:
-        """Delete expense from DataFrame."""
         if cls.df_expenses is None:
             return False
-        
-        initial_len = len(cls.df_expenses)
-        cls.df_expenses = cls.df_expenses[cls.df_expenses.get('id', pd.Series()) != expense_id]
-        
-        return len(cls.df_expenses) < initial_len
+        before = len(cls.df_expenses)
+        mask = cls.df_expenses['id'].astype(str) == expense_id
+        cls.df_expenses = cls.df_expenses[~mask]
+        deleted = len(cls.df_expenses) < before
+        if deleted:
+            cls._rebuild_aggregated()
+        return deleted
 
+    @classmethod
+    def _rebuild_aggregated(cls):
+        """Rebuild time-series aggregation after data mutation."""
+        if cls.df_expenses is None or cls.df_expenses.empty:
+            cls.df_aggregated = pd.DataFrame(columns=['date', 'total_amount'])
+            return
+        df = cls.df_expenses.copy()
+        daily = df.groupby('date')['amount'].sum().reset_index()
+        daily.columns = ['date', 'total_amount']
+        daily['date'] = pd.to_datetime(daily['date'])
+        dr = pd.date_range(start=daily['date'].min(), end=daily['date'].max(), freq='D')
+        full = pd.DataFrame({'date': dr})
+        daily = full.merge(daily, on='date', how='left')
+        daily['total_amount'] = daily['total_amount'].fillna(0)
+        daily['date'] = daily['date'].dt.strftime('%Y-%m-%d')
+        cls.df_aggregated = daily
 
-# Create FastAPI app
-app = FastAPI(title="FinFusion API", version="1.0.0")
-api_router = APIRouter(prefix="/api")
 
 # ==================== Pydantic Models ====================
 
@@ -132,526 +123,149 @@ class ExpenseCreate(BaseModel):
     description: str
     date: str
 
-class Budget(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    category: str
-    limit: float
-    period: str  # 'monthly'
-    ai_recommendation: bool
-    basis: str = "historical_average"
-    buffer_percent: int = 10
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-# ==================== Helper Functions ====================
+# ==================== App & Router ====================
 
-def get_latest_month_from_dataset() -> str:
-    """Get the latest month available in the dataset."""
-    if DataStore.df_expenses is None or DataStore.df_expenses.empty:
-        return datetime.now(timezone.utc).strftime("%Y-%m")
-    
-    # Get the latest date from dataset
-    latest_date = pd.to_datetime(DataStore.df_expenses['date']).max()
-    return latest_date.strftime("%Y-%m")
+app = FastAPI(title="FinFusion API", version="2.0.0")
+api_router = APIRouter(prefix="/api")
 
-def get_category_spending(days: int = 30, use_latest_month: bool = True) -> List[Dict]:
-    """Calculate spending by category for last N days or latest month in dataset."""
-    if DataStore.df_expenses is None or DataStore.df_expenses.empty:
-        return []
-    
-    df = DataStore.df_expenses.copy()
-    
-    if use_latest_month:
-        # Use latest month from dataset instead of current date
-        latest_month = get_latest_month_from_dataset()
-        df['date_parsed'] = pd.to_datetime(df['date'])
-        df = df[df['date_parsed'].dt.strftime("%Y-%m") == latest_month]
-    else:
-        # Use last N days from current date (original logic)
-        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-        df = df[df['date'] >= cutoff_date]
-    
-    # Group by category
-    category_totals = df.groupby('category')['amount'].sum().to_dict()
-    
-    return [{"category": k, "amount": float(v)} for k, v in category_totals.items()]
 
-def get_ai_suggestions() -> List[str]:
-    """Generate human-readable AI suggestions based on spending patterns."""
-    if DataStore.df_expenses is None or DataStore.df_expenses.empty:
-        return ["Start tracking your expenses to get personalized insights!"]
-    
-    try:
-        df = DataStore.df_expenses.copy()
-        suggestions = []
-        
-        # Use latest month data for analysis
-        latest_month = get_latest_month_from_dataset()
-        df['date_parsed'] = pd.to_datetime(df['date'])
-        current_month_df = df[df['date_parsed'].dt.strftime("%Y-%m") == latest_month]
-        
-        if current_month_df.empty:
-            return ["Add more expenses to get personalized suggestions!"]
-        
-        # 1. Highest spending category
-        category_spending = current_month_df.groupby('category')['amount'].sum().sort_values(ascending=False)
-        if len(category_spending) > 0:
-            top_cat = category_spending.index[0]
-            top_amount = category_spending.iloc[0]
-            total = category_spending.sum()
-            percentage = (top_amount / total * 100) if total > 0 else 0
-            
-            if percentage > 40:
-                suggestions.append(
-                    f"💰 {top_cat} takes up {percentage:.0f}% of your budget. Consider alternatives to reduce this."
-                )
-            else:
-                suggestions.append(
-                    f"📊 You're spending most on {top_cat} (₹{top_amount:.0f}). Track it closely to stay within budget."
-                )
-        
-        # 2. Small frequent purchases analysis
-        small_purchases = current_month_df[current_month_df['amount'] < 500]
-        if len(small_purchases) >= 5:
-            total_small = small_purchases['amount'].sum()
-            avg_small = total_small / len(small_purchases)
-            suggestions.append(
-                f"☕ You made {len(small_purchases)} small purchases averaging ₹{avg_small:.0f}. These add up to ₹{total_small:.0f}!"
-            )
-        
-        # 3. Large single expenses
-        large_purchases = current_month_df[current_month_df['amount'] > 1000]
-        if len(large_purchases) > 0:
-            largest = large_purchases['amount'].max()
-            largest_cat = large_purchases[large_purchases['amount'] == largest]['category'].iloc[0]
-            suggestions.append(
-                f"🎯 Your biggest expense was ₹{largest:.0f} on {largest_cat}. Plan ahead for big purchases to avoid budget stress."
-            )
-        
-        # 4. Spending trend
-        total_spending = current_month_df['amount'].sum()
-        num_days = current_month_df['date'].nunique()
-        daily_avg = total_spending / max(num_days, 1)
-        
-        if daily_avg > 500:
-            suggestions.append(
-                f"📈 You're spending about ₹{daily_avg:.0f} per day. Setting a daily limit of ₹{daily_avg * 0.9:.0f} could help you save."
-            )
-        
-        # 5. Category diversity suggestion
-        if len(category_spending) <= 2:
-            suggestions.append(
-                f"💡 Tip: Track expenses in more categories for better insights into your spending habits."
-            )
-        
-        # Return top 5 suggestions
-        return suggestions[:5]
-    
-    except Exception as e:
-        logger.error(f"AI suggestions error: {e}")
-        return [
-            "💡 Review your spending weekly to spot patterns",
-            "🎯 Set category-wise budgets to control spending",
-            "📱 Check your subscriptions - cancel what you don't use",
-            "🏠 Cook at home more often to save on food costs"
-        ]
-
-def generate_simple_forecast(days_ahead: int = 30) -> Dict:
-    """Simple forecasting using moving average (fallback method)."""
-    if DataStore.df_aggregated is None or DataStore.df_aggregated.empty:
-        return {
-            "forecast": [],
-            "trend": "insufficient_data",
-            "confidence": 0.0,
-            "fallback": True,
-            "error": "No time-series data available for forecasting",
-            "metadata": {"method": "none", "forecast_days": days_ahead}
-        }
-    
-    try:
-        # Use last 7 days average
-        recent_data = DataStore.df_aggregated.tail(7)
-        avg_amount = recent_data['total_amount'].mean()
-        
-        # Generate forecast
-        forecast_data = []
-        today = datetime.now(timezone.utc)
-        
-        for i in range(days_ahead):
-            future_date = today + timedelta(days=i)
-            forecast_data.append({
-                "date": future_date.strftime("%Y-%m-%d"),
-                "predicted_amount": round(float(avg_amount), 2)
-            })
-        
-        # Simple trend
-        if len(recent_data) >= 2:
-            first_half = recent_data.head(len(recent_data) // 2)['total_amount'].mean()
-            second_half = recent_data.tail(len(recent_data) // 2)['total_amount'].mean()
-            
-            if second_half > first_half * 1.1:
-                trend = "increasing"
-            elif second_half < first_half * 0.9:
-                trend = "decreasing"
-            else:
-                trend = "stable"
-        else:
-            trend = "stable"
-        
-        return {
-            "forecast": forecast_data,
-            "trend": trend,
-            "confidence": 0.45,
-            "fallback": True,
-            "error": "Using 7-day moving average (LSTM not trained)",
-            "metadata": {
-                "method": "moving_average",
-                "training_days": len(recent_data),
-                "forecast_days": days_ahead
-            }
-        }
-    
-    except Exception as e:
-        logger.error(f"Fallback forecast error: {e}")
-        return {
-            "forecast": [],
-            "trend": "error",
-            "confidence": 0.0,
-            "fallback": True,
-            "error": str(e),
-            "metadata": {"method": "error"}
-        }
-
-# ==================== API Routes ====================
+# ==================== Health ====================
 
 @api_router.get("/health")
 async def health():
-    """Health check endpoint."""
     return {
-        "ok": True,
-        "data_loaded": DataStore.data_loaded,
-        "lstm_trained": DataStore.lstm_trained,
-        "anomaly_trained": DataStore.anomaly_trained,
-        "expenses_count": len(DataStore.df_expenses) if DataStore.df_expenses is not None else 0
+        'data': {
+            'ok': True,
+            'data_loaded': DataStore.data_loaded,
+            'expenses_count': len(DataStore.df_expenses) if DataStore.df_expenses is not None else 0,
+        },
+        'metadata': {'version': '2.0.0'},
+        'error': None,
     }
 
 @api_router.get("/")
 async def root():
-    return {"message": "FinFusion API v1.0 - Dataset Mode"}
+    return {
+        'data': {'message': 'FinFusion API v2.0 — Data-driven insights'},
+        'metadata': {},
+        'error': None,
+    }
 
-# ==================== Expenses Endpoints ====================
+
+# ==================== Expenses ====================
 
 @api_router.post("/expenses", response_model=Expense)
 async def create_expense(expense: ExpenseCreate):
-    """Create new expense."""
-    expense_dict = expense.model_dump()
-    result = DataStore.add_expense(expense_dict)
+    result = DataStore.add_expense(expense.model_dump())
     return Expense(**result)
 
-@api_router.get("/expenses", response_model=List[Expense])
+@api_router.get("/expenses")
 async def get_expenses():
-    """Get all expenses."""
     expenses = DataStore.get_expenses_list()
-    return expenses
+    return {
+        'data': expenses,
+        'metadata': {'count': len(expenses)},
+        'error': None,
+    }
 
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str):
-    """Delete expense by ID."""
     deleted = DataStore.delete_expense(expense_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Expense not found")
-    return {"message": "Expense deleted"}
+    return {
+        'data': {'deleted': True},
+        'metadata': {},
+        'error': None,
+    }
 
-# ==================== Analytics Endpoints ====================
+
+# ==================== Analytics ====================
 
 @api_router.get("/analytics/spending")
 async def analytics_spending():
-    """Get spending analytics for latest available month."""
-    cs = get_category_spending(days=30, use_latest_month=True)
-    total = sum(item['amount'] for item in cs)
-    
-    # Get latest month info
-    latest_month = get_latest_month_from_dataset()
-    month_start = f"{latest_month}-01"
-    
-    # Calculate month end
-    if DataStore.df_expenses is not None and not DataStore.df_expenses.empty:
-        df = DataStore.df_expenses.copy()
-        df['date_parsed'] = pd.to_datetime(df['date'])
-        month_data = df[df['date_parsed'].dt.strftime("%Y-%m") == latest_month]
-        month_end = month_data['date'].max() if not month_data.empty else month_start
-    else:
-        month_end = month_start
-    
-    return {
-        "total_monthly": round(total, 2),
-        "by_category": cs,
-        "error": None,
-        "metadata": {
-            "period_start": month_start,
-            "period_end": month_end,
-            "period_label": latest_month,
-            "transaction_count": len(DataStore.df_expenses) if DataStore.df_expenses is not None else 0
-        }
-    }
+    """Spending analytics for the latest period, with month-over-month comparison."""
+    return DataStore.engine().get_analytics()
+
+
+# ==================== Insights / Suggestions ====================
 
 @api_router.get("/suggestions")
 async def suggestions():
-    """Get AI suggestions."""
-    return {"suggestions": get_ai_suggestions()}
+    """
+    Central insights endpoint.  All insights are computed by InsightsEngine.
+    Returns structured insight objects — no static strings.
+    """
+    return DataStore.engine().get_insights()
 
-# ==================== Forecast Endpoints ====================
+
+# ==================== Forecast ====================
 
 @api_router.get("/forecast")
 async def forecast_simple():
-    """Simple forecast using linear regression (legacy endpoint)."""
-    return generate_simple_forecast(days_ahead=30)
+    return DataStore.engine().get_forecast(days_ahead=30)
 
 @api_router.get("/forecast/lstm")
 async def forecast_lstm():
-    """
-    LSTM-based forecast endpoint.
-    Returns consistent schema with fallback support.
-    """
-    if not DataStore.lstm_trained:
-        # Return fallback response
-        return generate_simple_forecast(days_ahead=30)
-    
-    # TODO: Will be implemented in Phase 2 with LSTM model
-    return generate_simple_forecast(days_ahead=30)
+    """LSTM not trained — returns statistical fallback, clearly labeled."""
+    return DataStore.engine().get_forecast(days_ahead=30)
 
-# ==================== Budget Endpoints ====================
+
+# ==================== Budgets ====================
 
 @api_router.get("/budget/smart")
 async def get_smart_budget():
-    """
-    Auto-generate smart budgets based on spending patterns.
-    Returns consistent schema with fallback support.
-    """
-    # Use latest month for budget calculation
-    cs = get_category_spending(days=30, use_latest_month=True)
-    
-    if not cs:
-        return {
-            "budget": [],
-            "total": 0,
-            "current_spending": [],
-            "fallback": True,
-            "error": "No spending data available",
-            "metadata": {"method": "none", "period": "monthly", "confidence": 0.0}
-        }
-    
-    # Auto-generate budgets: average spending * 1.1 (10% buffer)
-    budgets = []
-    total_budget = 0
-    current_spending = []
-    
-    for item in cs:
-        # Set budget = current average * 1.1 (10% buffer)
-        limit = round(item['amount'] * 1.1, 2)
-        current = round(item['amount'], 2)
-        
-        budgets.append({
-            "category": item['category'],
-            "limit": limit,
-            "current": current,
-            "percentage": round((current / limit * 100) if limit > 0 else 0, 1),
-            "basis": "historical_average",
-            "buffer_percent": 10
-        })
-        
-        current_spending.append({
-            "category": item['category'],
-            "amount": current
-        })
-        
-        total_budget += limit
-    
-    method = "lstm_based" if DataStore.lstm_trained else "auto_generated"
-    
-    return {
-        "budget": budgets,
-        "total": round(total_budget, 2),
-        "current_spending": current_spending,
-        "fallback": not DataStore.lstm_trained,
-        "error": "Auto-generated from spending patterns (avg × 1.1)" if not DataStore.lstm_trained else None,
-        "metadata": {
-            "method": method,
-            "period": "monthly",
-            "confidence": 0.85 if DataStore.lstm_trained else 0.65
-        }
-    }
+    return DataStore.engine().get_budgets()
 
-# ==================== Anomaly Detection Endpoints ====================
+
+# ==================== Anomalies ====================
 
 @api_router.get("/expenses/anomalies")
 async def get_anomalies():
-    """
-    Detect anomalies in expenses.
-    Returns consistent schema with fallback support.
-    """
-    if DataStore.df_expenses is None or DataStore.df_expenses.empty:
-        return {
-            "alerts": [],
-            "count": 0,
-            "fallback": False,
-            "error": "No expense data available",
-            "metadata": {"method": "none", "total_transactions": 0, "contamination": 0.0}
-        }
-    
-    if not DataStore.anomaly_trained:
-        # Fallback: Use z-score method
-        try:
-            df = DataStore.df_expenses.copy()
-            mean_amount = df['amount'].mean()
-            std_amount = df['amount'].std()
-            
-            # Detect outliers (> 3 standard deviations)
-            threshold = 3.0
-            anomalies = []
-            
-            for _, row in df.iterrows():
-                # Ensure amount is a valid number
-                amount = row['amount']
-                if not np.isfinite(amount):
-                    continue
-                    
-                z_score = abs((amount - mean_amount) / std_amount) if std_amount > 0 else 0
-                
-                # Handle NaN or infinite values
-                if not np.isfinite(z_score):
-                    z_score = 0
-                
-                if z_score > threshold:
-                    severity = "high" if z_score > 4 else "medium" if z_score > 3.5 else "low"
-                    anomalies.append({
-                        "expense_id": row.get('id', str(uuid.uuid4())),
-                        "amount": float(amount),
-                        "category": row.get('category', 'Other'),
-                        "date": str(row['date']),
-                        "reason": "unusual_amount",
-                        "anomaly_score": -float(z_score),  # Negative to match Isolation Forest convention
-                        "severity": severity
-                    })
-            
-            # Sort by severity and limit to top 10
-            anomalies.sort(key=lambda x: x['anomaly_score'])
-            anomalies = anomalies[:10]
-            
-            return {
-                "alerts": anomalies,
-                "count": len(anomalies),
-                "fallback": True,
-                "error": "Isolation Forest not trained, using z-score outlier detection (threshold=3.0)",
-                "metadata": {
-                    "method": "z_score",
-                    "total_transactions": len(df),
-                    "threshold": threshold
-                }
-            }
-        
-        except Exception as e:
-            logger.error(f"Anomaly fallback error: {e}")
-            return {
-                "alerts": [],
-                "count": 0,
-                "fallback": True,
-                "error": str(e),
-                "metadata": {"method": "error"}
-            }
-    
-    # TODO: Will be implemented in Phase 3 with Isolation Forest
-    return {
-        "alerts": [],
-        "count": 0,
-        "fallback": False,
-        "error": None,
-        "metadata": {"method": "isolation_forest", "total_transactions": len(DataStore.df_expenses)}
-    }
+    return DataStore.engine().get_anomalies()
 
-# ==================== Startup/Shutdown Events ====================
+
+# ==================== Startup / Shutdown ====================
 
 @app.on_event("startup")
 async def startup_event():
-    """Load dataset and initialize models on startup."""
     logger.info("=" * 60)
-    logger.info("FinFusion API Starting...")
+    logger.info("FinFusion API v2.0 Starting...")
     logger.info("=" * 60)
-    
-    # Get dataset path from environment
+
     dataset_path = os.getenv('DATASET_PATH', './backend/data/budgetwise.csv')
     logger.info(f"Dataset path: {dataset_path}")
-    
+
     try:
-        # Initialize loader
         DataStore.loader = DatasetLoader(dataset_path)
-        
-        # Load and preprocess dataset
         df_expenses, df_aggregated = DataStore.loader.load_and_preprocess()
-        
+
         DataStore.df_expenses = df_expenses
         DataStore.df_aggregated = df_aggregated
         DataStore.scaler = DataStore.loader.scaler
         DataStore.data_loaded = True
-        
-        logger.info("✅ Dataset loaded successfully")
-        logger.info(f"   - Total expenses: {len(df_expenses)}")
-        logger.info(f"   - Time series days: {len(df_aggregated)}")
-        logger.info(f"   - Date range: {df_expenses['date'].min()} to {df_expenses['date'].max()}")
-        
-        # Validate for LSTM
-        lstm_valid, lstm_msg = DataStore.loader.validate_for_lstm(DataStore.min_rows_lstm)
-        if lstm_valid:
-            logger.info(f"✅ LSTM validation passed: {lstm_msg}")
-            # TODO: Train LSTM model in Phase 2
-            DataStore.lstm_trained = False
-            logger.info("⚠️  LSTM model training not yet implemented (Phase 2)")
-        else:
-            logger.warning(f"⚠️  LSTM validation failed: {lstm_msg}")
-            DataStore.lstm_trained = False
-        
-        # Validate for anomaly detection
-        anomaly_valid, anomaly_msg = DataStore.loader.validate_for_anomaly(DataStore.min_rows_anomaly)
-        if anomaly_valid:
-            logger.info(f"✅ Anomaly detection validation passed: {anomaly_msg}")
-            # TODO: Train Isolation Forest in Phase 3
-            DataStore.anomaly_trained = False
-            logger.info("⚠️  Anomaly detection model training not yet implemented (Phase 3)")
-        else:
-            logger.warning(f"⚠️  Anomaly detection validation failed: {anomaly_msg}")
-            DataStore.anomaly_trained = False
-        
+
+        logger.info(f"Dataset loaded: {len(df_expenses)} expenses, {len(df_aggregated)} time periods")
+        logger.info(f"Date range: {df_expenses['date'].min()} to {df_expenses['date'].max()}")
+
+        # Quick engine test
+        engine = DataStore.engine()
+        _ = engine.get_analytics()
+        insight_count = len(engine.get_insights().get('data', []))
+        logger.info(f"InsightsEngine ready — {insight_count} insights generated")
         logger.info("=" * 60)
-        logger.info("🚀 FinFusion API Ready")
-        logger.info(f"   - Data loaded: {DataStore.data_loaded}")
-        logger.info(f"   - LSTM trained: {DataStore.lstm_trained}")
-        logger.info(f"   - Anomaly detection trained: {DataStore.anomaly_trained}")
-        logger.info("=" * 60)
-        
-    except FileNotFoundError as e:
-        logger.error("=" * 60)
-        logger.error(f"❌ FATAL ERROR: {e}")
-        logger.error("=" * 60)
-        logger.error("Please download the BudgetWise dataset and place it at:")
-        logger.error(f"   {dataset_path}")
-        logger.error("")
-        logger.error("Dataset source:")
-        logger.error("   https://www.kaggle.com/datasets/mohammedarfathr/budgetwise-personal-finance-dataset")
-        logger.error("=" * 60)
-        raise
-    
+
     except Exception as e:
-        logger.error("=" * 60)
-        logger.error(f"❌ FATAL ERROR during startup: {e}")
-        logger.error("=" * 60)
+        logger.error(f"FATAL: {e}")
         raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown."""
     logger.info("FinFusion API shutting down...")
 
-# ==================== Include Router & Middleware ====================
+
+# ==================== Router & CORS ====================
 
 app.include_router(api_router)
 
