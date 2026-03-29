@@ -83,10 +83,17 @@ export default function Dashboard() {
 
   async function deleteExpense(id) {
     try {
+      // Optimistic: remove from UI immediately
+      setExpenses(prev => prev.filter(e => e.id !== id));
       await api.deleteExpense(id);
       toast.success('Expense deleted');
-      await loadData();
-    } catch (err) { toast.error('Failed to delete expense'); }
+      // Re-fetch all data to sync totals and budgets
+      loadData();
+    } catch (err) {
+      toast.error('Failed to delete expense');
+      // Revert on failure
+      loadData();
+    }
   }
 
   async function handleReceiptUpload(e) {

@@ -48,7 +48,12 @@ Convert FinFusion from a rule-based system to a TRUE data-driven Personal Financ
 - InsightsEngine generates 20 data-driven insights from 9,942 expenses
 - No static text in any frontend render
 
-### Budget Page UI Redesign (2026-03-29)
+### Expense Delete Fix & Data Consistency (2026-03-29)
+- **Root Cause**: `get_expenses_list()` generated new UUIDs on every call (never persisted). Delete compared against non-existent IDs → always 404.
+- **Fix**: Added `assign_stable_ids()` called once at startup — assigns persistent UUIDs into `df_expenses['id']` column.
+- Added `GET /api/expenses/category/{category}` endpoint for filtered access.
+- Budget page: added expandable expense dropdown per category card with inline delete (Trash2 icon on hover).
+- Optimistic UI delete on Dashboard — removes item immediately, then re-fetches all data to sync totals.
 - Completely redesigned Budgets page matching provided screenshot spec
 - Overview card with total limit, usage progress bar, spent/left breakdown
 - Data Insight box rendering backend-provided insights (not static)
