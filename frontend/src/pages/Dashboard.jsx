@@ -55,7 +55,7 @@ export default function Dashboard() {
       setExpenses(Array.isArray(exp) ? exp : []);
       setInsights(insightsRes?.data || []);
       setAnalytics(an || { data: { total_monthly: 0, by_category: [], comparison: null }, metadata: {} });
-      setBudgets(Array.isArray(budg) ? budg : []);
+      setBudgets(budg?.data?.budget || []);
     } catch (err) {
       console.error('loadData error:', err);
       toast.error('Failed to load data');

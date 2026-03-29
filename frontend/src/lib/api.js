@@ -69,11 +69,10 @@ export async function getForecast() {
 export async function getBudgets() {
   try {
     const r = await axios.get(`${API}/budget/smart`);
-    const body = r.data || {};
-    return body.data?.budget || [];
+    return r.data || { data: { budget: [], total: 0 }, metadata: {}, error: null };
   } catch (e) {
     console.error('getBudgets error:', e);
-    return [];
+    return { data: { budget: [], total: 0 }, metadata: {}, error: e.message };
   }
 }
 
