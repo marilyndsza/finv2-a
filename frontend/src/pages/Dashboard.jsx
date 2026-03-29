@@ -23,7 +23,7 @@ import {
 import { formatCurrency } from '@/utils/formatCurrency';
 import * as api from '@/lib/api';
 
-const COLORS = ["#FF0066", "#FF6C0C", "#934790", "#8CA9FF", "#3B82F6", "#10B981"];
+const COLORS = ["#FF0066", "#FF6C0C", "#934790", "#8CA9FF", "#3B82F6", "#10B981", "#F59E0B", "#EC4899", "#14B8A6"];
 
 const categories = [
   'Food', 'Transport', 'Shopping', 'Entertainment',
@@ -252,28 +252,28 @@ export default function Dashboard() {
           {/* DONUT */}
           <Card className="rounded-[24px] border-0 shadow-sm bg-white p-6 flex flex-col" data-testid="spending-chart-card">
             <p className="text-sm font-semibold text-slate-900 mb-1">Spending by Category</p>
-            <p className="text-xs text-slate-400 mb-4">Breakdown for {periodLabel}</p>
+            <p className="text-xs text-slate-400 mb-2">Breakdown for {periodLabel}</p>
             {byCategory.length > 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center">
-                <div className="relative flex items-center justify-center w-full py-4">
-                  <ResponsiveContainer width="100%" height={220}>
+              <div className="flex-1 flex flex-col items-center justify-center min-h-0">
+                <div className="relative flex items-center justify-center w-full">
+                  <ResponsiveContainer width="100%" height={200}>
                     <PieChart>
-                      <Pie data={byCategory} cx="50%" cy="50%" innerRadius={60} outerRadius={85}
-                        startAngle={90} endAngle={-270} paddingAngle={2} cornerRadius={10} dataKey="amount">
+                      <Pie data={byCategory} cx="50%" cy="50%" innerRadius={55} outerRadius={90}
+                        startAngle={90} endAngle={-270} paddingAngle={2} cornerRadius={8} dataKey="amount">
                         {byCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                       </Pie>
                     </PieChart>
                   </ResponsiveContainer>
-                  <div className="absolute text-center">
-                    <p className="text-xs text-slate-400">Total</p>
-                    <p className="text-xl font-bold text-slate-900">{formatCurrency(totalSpent)}</p>
+                  <div className="absolute text-center pointer-events-none">
+                    <p className="text-[10px] text-slate-400 leading-none">Total</p>
+                    <p className="text-sm font-bold text-slate-900 mt-0.5 leading-tight">{formatCurrency(totalSpent)}</p>
                   </div>
                 </div>
-                <div className="mt-8 grid grid-cols-2 gap-y-2 text-xs text-slate-500 w-full">
+                <div className="mt-3 grid grid-cols-2 gap-y-1.5 gap-x-4 text-xs text-slate-500 w-full">
                   {byCategory.map((item, i) => (
                     <div key={item.category + i} className="flex items-center gap-2">
-                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                      <span>{item.category}</span>
+                      <span className="inline-block h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                      <span className="truncate">{item.category}</span>
                     </div>
                   ))}
                 </div>
@@ -285,9 +285,9 @@ export default function Dashboard() {
         </div>
 
         {/* BOTTOM: EXPENSES + BUDGETS + INSIGHTS */}
-        <div className="grid grid-cols-1 lg:grid-cols-[2fr,1.1fr] gap-8 mt-10">
+        <div className="grid grid-cols-1 lg:grid-cols-[2fr,1.1fr] gap-8 mt-10 items-start">
           {/* RECENT EXPENSES */}
-          <Card className="rounded-[24px] border-0 shadow-sm bg-white p-6 flex flex-col" data-testid="recent-expenses-card">
+          <Card className="rounded-[24px] border-0 shadow-sm bg-white p-6" data-testid="recent-expenses-card">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <p className="text-sm font-semibold text-slate-900">Recent Expenses</p>
@@ -297,7 +297,7 @@ export default function Dashboard() {
                 <Plus className="w-4 h-4" />
               </Button>
             </div>
-            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+            <div className="space-y-1 max-h-[360px] overflow-y-auto pr-1">
               {expenses.slice(0, 10).map(expense => (
                 <div key={expense.id} className="flex items-center justify-between px-3 py-3 rounded-[16px] hover:bg-slate-50 transition-colors" data-testid={`expense-item-${expense.id}`}>
                   <div className="flex items-center gap-3 flex-1">
@@ -317,7 +317,7 @@ export default function Dashboard() {
                 <div className="text-center py-10 text-slate-300 text-sm">No expenses yet</div>
               )}
             </div>
-            <div className="mt-5 flex justify-end">
+            <div className="mt-3 flex justify-end">
               <Button variant="outline" className="rounded-full text-xs font-semibold flex items-center gap-2"
                 onClick={() => document.getElementById('receipt-upload')?.click()} data-testid="scan-receipt-btn">
                 <Upload className="w-4 h-4" /> Scan Receipt

@@ -323,11 +323,13 @@ export default function Budgets() {
       </Dialog>
 
       {/* FAB */}
-      <Link to="/" data-testid="fab-add">
-        <button className="fixed bottom-8 right-8 h-14 w-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-700 text-white shadow-xl shadow-indigo-300 flex items-center justify-center hover:scale-105 transition-transform z-40">
-          <Plus className="w-6 h-6" />
-        </button>
-      </Link>
+      <div className="fixed bottom-8 right-8 z-50" data-testid="fab-add">
+        <Link to="/">
+          <button className="h-14 w-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-700 text-white shadow-xl shadow-indigo-300/50 flex items-center justify-center hover:scale-105 transition-transform">
+            <Plus className="w-6 h-6" />
+          </button>
+        </Link>
+      </div>
     </div>
   );
 }

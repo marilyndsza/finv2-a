@@ -48,6 +48,16 @@ Convert FinFusion from a rule-based system to a TRUE data-driven Personal Financ
 - InsightsEngine generates 20 data-driven insights from 9,942 expenses
 - No static text in any frontend render
 
+### Budget Page UI Redesign (2026-03-29)
+- Completely redesigned Budgets page matching provided screenshot spec
+- Overview card with total limit, usage progress bar, spent/left breakdown
+- Data Insight box rendering backend-provided insights (not static)
+- Category cards grid (4 columns) with unique icons per category, budget amounts, ADJUST buttons
+- Color-coded progress bars and status badges (ON TRACK/CLOSE TO LIMIT/OVER BUDGET)
+- Purple gradient theme matching site-wide aesthetic
+- FAB (+) button for quick actions
+- Updated `getBudgets()` API to return full `{data, metadata, error}` shape
+
 ## Updated Data Loader
 - Handles Kaggle raw format (mixed dates, dirty categories, $ amounts, Income/Expense types)
 - Category normalization: 26+ misspelling variants → 9 clean categories
