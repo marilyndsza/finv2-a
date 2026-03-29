@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import GroupExpenses from './pages/GroupExpenses';
 import Budgets from './pages/Budgets';
 import Forecasting from './pages/Forecasting';
+import Insights from './pages/Insights';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
           <Route path="/groups" element={<GroupExpenses />} />
           <Route path="/budgets" element={<Budgets />} />
           <Route path="/forecast" element={<Forecasting />} />
+          <Route path="/insights" element={<Insights />} />
         </Routes>
       </BrowserRouter>
     </div>

@@ -28,15 +28,63 @@ export async function deleteExpense(id) {
   return { ok: true };
 }
 
-// ==================== Analytics ====================
+// ==================== Analytics (context-aware) ====================
 
-export async function getAnalyticsSpending() {
+export async function getAnalyticsSpending(month, year) {
   try {
-    const r = await axios.get(`${API}/analytics/spending`);
+    const params = {};
+    if (month != null) params.month = month;
+    if (year != null) params.year = year;
+    const r = await axios.get(`${API}/analytics/spending`, { params });
     return r.data || { data: {}, metadata: {}, error: null };
   } catch (e) {
     console.error('getAnalyticsSpending error:', e);
     return { data: { total_monthly: 0, by_category: [], comparison: null }, metadata: {}, error: e.message };
+  }
+}
+
+export async function getCurrentAnalytics(month, year) {
+  try {
+    const params = {};
+    if (month != null) params.month = month;
+    if (year != null) params.year = year;
+    const r = await axios.get(`${API}/analytics/current`, { params });
+    return r.data || { data: {}, metadata: {}, error: null };
+  } catch (e) {
+    console.error('getCurrentAnalytics error:', e);
+    return { data: { total_monthly: 0, categories: [] }, metadata: {}, error: e.message };
+  }
+}
+
+export async function getAvailableMonths() {
+  try {
+    const r = await axios.get(`${API}/analytics/available-months`);
+    return r.data || { data: [], metadata: {}, error: null };
+  } catch (e) {
+    console.error('getAvailableMonths error:', e);
+    return { data: [], metadata: { default: { month: 12, year: 2024 } }, error: e.message };
+  }
+}
+
+// ==================== Historical ====================
+
+export async function getHistory() {
+  try {
+    const r = await axios.get(`${API}/analytics/history`);
+    return r.data || { data: {}, metadata: {}, error: null };
+  } catch (e) {
+    console.error('getHistory error:', e);
+    return { data: { monthly_totals: [] }, metadata: {}, error: e.message };
+  }
+}
+
+export async function getCategoryTrends() {
+  try {
+    const r = await axios.get(`${API}/analytics/category-trends`);
+    return r.data || { data: {}, metadata: {}, error: null };
+  } catch (e) {
+    console.error('getCategoryTrends error:', e);
+    return { data: { periods: [], series: {} }, metadata: {}, error: e.message };
   }
 }
 
@@ -64,11 +112,14 @@ export async function getForecast() {
   }
 }
 
-// ==================== Budgets ====================
+// ==================== Budgets (context-aware) ====================
 
-export async function getBudgets() {
+export async function getBudgets(month, year) {
   try {
-    const r = await axios.get(`${API}/budget/smart`);
+    const params = {};
+    if (month != null) params.month = month;
+    if (year != null) params.year = year;
+    const r = await axios.get(`${API}/budget/smart`, { params });
     return r.data || { data: { budget: [], total: 0 }, metadata: {}, error: null };
   } catch (e) {
     console.error('getBudgets error:', e);

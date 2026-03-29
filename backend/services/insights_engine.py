@@ -30,6 +30,273 @@ class InsightsEngine:
             self.df['_date'] = pd.to_datetime(self.df['date'], errors='coerce')
             self.df = self.df.dropna(subset=['_date'])
             self.df['_month'] = self.df['_date'].dt.to_period('M')
+            self.df['_year'] = self.df['_date'].dt.year
+            self.df['_month_num'] = self.df['_date'].dt.month
+
+    # ================================================================= #
+    #  CENTRAL FILTER — used by ALL features
+    # ================================================================= #
+
+    def get_filtered_expenses(self, month: int = None, year: int = None,
+                              category: str = None) -> pd.DataFrame:
+        """Single reusable filter. All current-context views MUST use this."""
+        df = self.df
+        if df.empty:
+            return df
+        if year is not None:
+            df = df[df['_year'] == year]
+        if month is not None:
+            df = df[df['_month_num'] == month]
+        if category is not None:
+            df = df[df['category'].str.lower() == category.strip().lower()]
+        return df
+
+    def get_available_months(self) -> list:
+        """Return sorted list of {month, year, label, count}."""
+        if self.df.empty:
+            return []
+        grouped = (
+            self.df.groupby(['_year', '_month_num'])
+            .size()
+            .reset_index(name='count')
+        )
+        grouped.columns = ['year', 'month', 'count']
+        grouped = grouped.sort_values(['year', 'month'], ascending=[False, False])
+        result = []
+        month_names = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        for _, row in grouped.iterrows():
+            y, m, c = int(row['year']), int(row['month']), int(row['count'])
+            result.append({
+                'month': m, 'year': y, 'count': c,
+                'label': f'{month_names[m]} {y}',
+            })
+        return result
+
+    def get_default_context(self) -> dict:
+        """Return the latest available month/year in the dataset."""
+        months = self.get_available_months()
+        if months:
+            return {'month': months[0]['month'], 'year': months[0]['year']}
+        return {'month': 1, 'year': 2024}
+
+    # ================================================================= #
+    #  CURRENT CONTEXT — scoped to a specific month
+    # ================================================================= #
+
+    def get_current_analytics(self, month: int, year: int) -> Dict:
+        """Spending analytics scoped to a single month, with prev-month comparison."""
+        cur_df = self.get_filtered_expenses(month=month, year=year)
+
+        # Previous month
+        prev_m = month - 1 if month > 1 else 12
+        prev_y = year if month > 1 else year - 1
+        prev_df = self.get_filtered_expenses(month=prev_m, year=prev_y)
+
+        by_cat = (
+            cur_df.groupby('category')['amount']
+            .sum()
+            .sort_values(ascending=False)
+            .reset_index()
+        ) if not cur_df.empty else pd.DataFrame(columns=['category', 'amount'])
+        by_cat.columns = ['category', 'amount']
+        by_cat['amount'] = by_cat['amount'].round(2)
+
+        # Include expenses per category for the dropdown
+        categories = []
+        for _, row in by_cat.iterrows():
+            cat = row['category']
+            cat_expenses = cur_df[cur_df['category'] == cat][
+                ['id', 'date', 'amount', 'description']
+            ].copy() if 'id' in cur_df.columns else pd.DataFrame()
+            cat_expenses = cat_expenses.sort_values('date', ascending=False) if not cat_expenses.empty else cat_expenses
+            categories.append({
+                'category': cat,
+                'spent': round(float(row['amount']), 2),
+                'expenses': cat_expenses.to_dict('records') if not cat_expenses.empty else [],
+            })
+
+        total_current = round(float(cur_df['amount'].sum()), 2) if not cur_df.empty else 0
+        total_prev = round(float(prev_df['amount'].sum()), 2) if not prev_df.empty else None
+
+        comparison = None
+        if total_prev is not None and total_prev > 0:
+            delta = total_current - total_prev
+            delta_pct = round((delta / total_prev) * 100, 1)
+            comparison = {
+                'previous_total': total_prev,
+                'delta': round(delta, 2),
+                'delta_pct': delta_pct,
+                'direction': 'increased' if delta > 0 else 'decreased' if delta < 0 else 'unchanged',
+            }
+
+        month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                       'July', 'August', 'September', 'October', 'November', 'December']
+
+        return {
+            'data': {
+                'total_monthly': total_current,
+                'by_category': by_cat.to_dict('records'),
+                'categories': categories,
+                'comparison': comparison,
+            },
+            'metadata': {
+                'month': month,
+                'year': year,
+                'label': f'{month_names[month]} {year}',
+                'transaction_count': len(cur_df),
+            },
+            'error': None,
+        }
+
+    def get_current_budgets(self, month: int, year: int) -> Dict:
+        """Budgets scoped to a specific month. Limits from historical, spent from current."""
+        cur_df = self.get_filtered_expenses(month=month, year=year)
+
+        # Historical = everything EXCEPT the selected month
+        hist_df = self.df[~((self.df['_year'] == year) & (self.df['_month_num'] == month))]
+        if hist_df.empty:
+            hist_df = cur_df  # fallback if no history
+
+        hist_monthly = (
+            hist_df.groupby([hist_df['_month'].astype(str), 'category'])['amount']
+            .sum().reset_index()
+        )
+        hist_monthly.columns = ['period', 'category', 'amount']
+
+        cat_stats = (
+            hist_monthly.groupby('category')['amount']
+            .agg(['mean', 'std', 'count']).reset_index()
+        )
+        cat_stats.columns = ['category', 'hist_mean', 'hist_std', 'hist_months']
+        cat_stats['hist_std'] = cat_stats['hist_std'].fillna(0)
+
+        cur_cat = cur_df.groupby('category')['amount'].sum().reset_index()
+        cur_cat.columns = ['category', 'current']
+
+        merged = cat_stats.merge(cur_cat, on='category', how='outer').fillna(0)
+
+        budgets = []
+        total_budget = 0
+        for _, row in merged.iterrows():
+            hist_mean = float(row['hist_mean'])
+            hist_std = float(row['hist_std'])
+            current = round(float(row['current']), 2)
+
+            if hist_mean > 0:
+                limit = round(hist_mean + hist_std, 2)
+            elif current > 0:
+                limit = round(current * 1.15, 2)
+            else:
+                continue
+
+            pct = round((current / limit * 100) if limit > 0 else 0, 1)
+            budgets.append({
+                'category': row['category'],
+                'limit': limit,
+                'current': current,
+                'percentage': pct,
+                'basis': 'historical_mean_plus_std' if hist_mean > 0 else 'current_spending',
+                'hist_mean': round(hist_mean, 2),
+                'hist_std': round(hist_std, 2),
+                'months_of_data': int(row['hist_months']),
+            })
+            total_budget += limit
+
+        budgets.sort(key=lambda x: x['current'], reverse=True)
+
+        month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                       'July', 'August', 'September', 'October', 'November', 'December']
+        return {
+            'data': {'budget': budgets, 'total': round(total_budget, 2)},
+            'metadata': {
+                'method': 'historical_mean_plus_std',
+                'method_label': 'Budget = historical monthly average + 1 standard deviation',
+                'is_ml_model': False,
+                'month': month, 'year': year,
+                'label': f'{month_names[month]} {year}',
+                'history_months': int(cat_stats['hist_months'].max()) if not cat_stats.empty else 0,
+            },
+            'error': None,
+        }
+
+    # ================================================================= #
+    #  HISTORICAL CONTEXT — full dataset aggregations
+    # ================================================================= #
+
+    def get_history(self) -> Dict:
+        """Monthly totals across all time. No raw transactions."""
+        if self.df.empty:
+            return self._empty('history', 'No data')
+
+        monthly = (
+            self.df.groupby(self.df['_month'].astype(str))['amount']
+            .agg(['sum', 'count']).reset_index()
+        )
+        monthly.columns = ['period', 'total', 'count']
+        monthly = monthly.sort_values('period')
+        monthly['total'] = monthly['total'].round(2)
+
+        date_range_start = str(self.df['_date'].min().date())
+        date_range_end = str(self.df['_date'].max().date())
+
+        return {
+            'data': {
+                'monthly_totals': monthly.to_dict('records'),
+            },
+            'metadata': {
+                'total_months': len(monthly),
+                'date_range': f'{date_range_start} to {date_range_end}',
+                'label': f'Historical trends ({self.df["_year"].min()}–{self.df["_year"].max()})',
+            },
+            'error': None,
+        }
+
+    def get_category_trends(self) -> Dict:
+        """Per-category monthly spending over time."""
+        if self.df.empty:
+            return self._empty('category_trends', 'No data')
+
+        pivot = (
+            self.df.groupby([self.df['_month'].astype(str), 'category'])['amount']
+            .sum().reset_index()
+        )
+        pivot.columns = ['period', 'category', 'amount']
+        pivot['amount'] = pivot['amount'].round(2)
+
+        # Get all unique categories and periods
+        categories = sorted(pivot['category'].unique().tolist())
+        periods = sorted(pivot['period'].unique().tolist())
+
+        # Build series per category
+        series = {}
+        for cat in categories:
+            cat_data = pivot[pivot['category'] == cat].set_index('period')['amount']
+            series[cat] = [round(float(cat_data.get(p, 0)), 2) for p in periods]
+
+        # Top categories by total all-time spending
+        top = (
+            self.df.groupby('category')['amount'].sum()
+            .sort_values(ascending=False).head(8)
+        )
+        top_categories = [
+            {'category': cat, 'total': round(float(amt), 2)}
+            for cat, amt in top.items()
+        ]
+
+        return {
+            'data': {
+                'periods': periods,
+                'categories': categories,
+                'series': series,
+                'top_categories': top_categories,
+            },
+            'metadata': {
+                'total_periods': len(periods),
+                'total_categories': len(categories),
+            },
+            'error': None,
+        }
 
     # ================================================================= #
     #  PUBLIC API

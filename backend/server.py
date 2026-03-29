@@ -206,9 +206,42 @@ async def delete_expense(expense_id: str):
 # ==================== Analytics ====================
 
 @api_router.get("/analytics/spending")
-async def analytics_spending():
-    """Spending analytics for the latest period, with month-over-month comparison."""
-    return DataStore.engine().get_analytics()
+async def analytics_spending(month: Optional[int] = None, year: Optional[int] = None):
+    """Spending analytics. If month/year provided, scopes to that month."""
+    engine = DataStore.engine()
+    if month is not None and year is not None:
+        return engine.get_current_analytics(month, year)
+    ctx = engine.get_default_context()
+    return engine.get_current_analytics(ctx['month'], ctx['year'])
+
+@api_router.get("/analytics/current")
+async def analytics_current(month: Optional[int] = None, year: Optional[int] = None):
+    """Current month analytics with per-category expense lists."""
+    engine = DataStore.engine()
+    if month is None or year is None:
+        ctx = engine.get_default_context()
+        month, year = ctx['month'], ctx['year']
+    return engine.get_current_analytics(month, year)
+
+@api_router.get("/analytics/history")
+async def analytics_history():
+    """Full historical monthly aggregations. No raw transactions."""
+    return DataStore.engine().get_history()
+
+@api_router.get("/analytics/category-trends")
+async def analytics_category_trends():
+    """Per-category monthly spending over time."""
+    return DataStore.engine().get_category_trends()
+
+@api_router.get("/analytics/available-months")
+async def available_months():
+    """List of all available months for the context picker."""
+    engine = DataStore.engine()
+    return {
+        'data': engine.get_available_months(),
+        'metadata': {'default': engine.get_default_context()},
+        'error': None,
+    }
 
 
 # ==================== Insights / Suggestions ====================
@@ -237,8 +270,12 @@ async def forecast_lstm():
 # ==================== Budgets ====================
 
 @api_router.get("/budget/smart")
-async def get_smart_budget():
-    return DataStore.engine().get_budgets()
+async def get_smart_budget(month: Optional[int] = None, year: Optional[int] = None):
+    engine = DataStore.engine()
+    if month is None or year is None:
+        ctx = engine.get_default_context()
+        month, year = ctx['month'], ctx['year']
+    return engine.get_current_budgets(month, year)
 
 
 # ==================== Anomalies ====================

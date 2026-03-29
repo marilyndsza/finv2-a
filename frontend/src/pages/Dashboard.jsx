@@ -109,7 +109,7 @@ export default function Dashboard() {
   const totalSpent = spendingData.total_monthly || 0;
   const byCategory = spendingData.by_category || [];
   const comparison = spendingData.comparison;
-  const periodLabel = analytics?.metadata?.current_period || 'Current';
+  const periodLabel = analytics?.metadata?.label || analytics?.metadata?.current_period || 'Current';
   const totalBudget = budgets.reduce((s, b) => s + (b.limit || 0), 0);
   const budgetRemaining = Math.max(0, totalBudget - totalSpent);
   const budgetUsedPct = totalBudget > 0 ? (totalSpent / totalBudget * 100) : 0;
@@ -128,6 +128,7 @@ export default function Dashboard() {
           <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-500">
             <Link to="/" className="text-indigo-600 border-b-2 border-indigo-500 pb-1" data-testid="nav-dashboard">Dashboard</Link>
             <Link to="/budgets" className="hover:text-slate-800 transition-colors" data-testid="nav-budgets">Budgets</Link>
+            <Link to="/insights" className="hover:text-slate-800 transition-colors" data-testid="nav-insights">Insights</Link>
             <Link to="/forecast" className="hover:text-slate-800 transition-colors" data-testid="nav-forecast">Forecast</Link>
             <Link to="/groups" className="hover:text-slate-800 transition-colors" data-testid="nav-groups">Groups</Link>
           </nav>

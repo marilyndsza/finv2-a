@@ -54,29 +54,46 @@ function getStatusInfo(pct) {
 export default function Budgets() {
   const [budgets, setBudgets] = useState([]);
   const [budgetMeta, setBudgetMeta] = useState({});
-  const [analytics, setAnalytics] = useState(null);
+  const [currentData, setCurrentData] = useState(null);
   const [topInsight, setTopInsight] = useState(null);
   const [loading, setLoading] = useState(true);
   const [adjustDialog, setAdjustDialog] = useState({ open: false, category: '', limit: '' });
   const [expandedCards, setExpandedCards] = useState({});
-  const [categoryExpenses, setCategoryExpenses] = useState({});
 
-  useEffect(() => { loadData(); }, []);
+  // Month context
+  const [availableMonths, setAvailableMonths] = useState([]);
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [selectedYear, setSelectedYear] = useState(null);
 
-  async function loadData() {
+  useEffect(() => { initContext(); }, []);
+
+  async function initContext() {
+    const res = await api.getAvailableMonths();
+    const months = res?.data || [];
+    const defaultCtx = res?.metadata?.default || {};
+    setAvailableMonths(months);
+    setSelectedMonth(defaultCtx.month || 12);
+    setSelectedYear(defaultCtx.year || 2024);
+  }
+
+  useEffect(() => {
+    if (selectedMonth != null && selectedYear != null) {
+      loadData(selectedMonth, selectedYear);
+    }
+  }, [selectedMonth, selectedYear]);
+
+  async function loadData(m, y) {
     setLoading(true);
     try {
-      const [budgetRes, analyticsData, suggestionsRes] = await Promise.all([
-        api.getBudgets(),
-        api.getAnalyticsSpending(),
+      const [budgetRes, currentRes, suggestionsRes] = await Promise.all([
+        api.getBudgets(m, y),
+        api.getCurrentAnalytics(m, y),
         api.getSuggestions(),
       ]);
-      const budgetList = budgetRes?.data?.budget || [];
-      setBudgets(budgetList);
+      setBudgets(budgetRes?.data?.budget || []);
       setBudgetMeta(budgetRes?.metadata || {});
-      setAnalytics(analyticsData);
+      setCurrentData(currentRes);
 
-      // Pick the most relevant insight for the insight box
       const allInsights = suggestionsRes?.data || [];
       const monthComp = allInsights.find(i => i.type === 'month_comparison');
       const catComp = allInsights.find(i => i.type === 'category_comparison');
@@ -87,40 +104,33 @@ export default function Budgets() {
     } finally { setLoading(false); }
   }
 
-  // Computed totals from backend data
-  const totalLimit = budgets.reduce((s, b) => s + (b.limit || 0), 0);
+  // Category expenses from current context data (scoped to selected month)
+  function getCategoryExpenses(category) {
+    const cats = currentData?.data?.categories || [];
+    const cat = cats.find(c => c.category === category);
+    return cat?.expenses || [];
+  }
 
   async function toggleCategory(category) {
-    const isOpen = expandedCards[category];
-    if (isOpen) {
-      setExpandedCards(prev => ({ ...prev, [category]: false }));
-      return;
-    }
-    // Fetch expenses for this category
-    const expenses = await api.getExpensesByCategory(category);
-    setCategoryExpenses(prev => ({ ...prev, [category]: expenses }));
-    setExpandedCards(prev => ({ ...prev, [category]: true }));
+    setExpandedCards(prev => ({ ...prev, [category]: !prev[category] }));
   }
 
   async function handleDeleteExpense(id, category) {
     try {
       await api.deleteExpense(id);
       toast.success('Expense deleted');
-      // Remove from local dropdown state
-      setCategoryExpenses(prev => ({
-        ...prev,
-        [category]: (prev[category] || []).filter(e => e.id !== id)
-      }));
-      // Re-fetch budgets + analytics to sync totals
-      await loadData();
+      await loadData(selectedMonth, selectedYear);
     } catch (err) {
       toast.error('Failed to delete expense');
     }
   }
+
+  // Computed totals from backend data
+  const totalLimit = budgets.reduce((s, b) => s + (b.limit || 0), 0);
   const totalSpent = budgets.reduce((s, b) => s + (b.current || 0), 0);
   const totalLeft = Math.max(0, totalLimit - totalSpent);
   const utilizationPct = totalLimit > 0 ? (totalSpent / totalLimit) * 100 : 0;
-  const period = analytics?.metadata?.current_period || budgetMeta?.period || 'Current';
+  const periodLabel = budgetMeta?.label || currentData?.metadata?.label || 'Current';
 
   if (loading) {
     return (
@@ -147,6 +157,7 @@ export default function Budgets() {
           <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-500">
             <Link to="/" className="hover:text-slate-800 transition-colors" data-testid="nav-dashboard">Dashboard</Link>
             <Link to="/budgets" className="text-indigo-600 border-b-2 border-indigo-500 pb-1" data-testid="nav-budgets">Budgets</Link>
+            <Link to="/insights" className="hover:text-slate-800 transition-colors" data-testid="nav-insights">Insights</Link>
             <Link to="/forecast" className="hover:text-slate-800 transition-colors" data-testid="nav-forecast">Forecast</Link>
             <Link to="/groups" className="hover:text-slate-800 transition-colors" data-testid="nav-groups">Groups</Link>
           </nav>
@@ -155,19 +166,39 @@ export default function Budgets() {
       </header>
 
       <main className="container mx-auto px-6 py-10 max-w-6xl">
-        {/* TITLE + ADD CATEGORY */}
+        {/* TITLE + MONTH PICKER + ADD CATEGORY */}
         <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
           <div>
             <h1 className="text-3xl md:text-4xl font-bold text-slate-900" data-testid="budget-title">Budgets</h1>
             <p className="text-slate-500 mt-2 max-w-md">
-              Track your spending and stay within limits. Data-driven budgets for {period}.
+              Showing data for <span className="font-semibold text-indigo-600" data-testid="period-label">{periodLabel}</span>
             </p>
           </div>
-          <Link to="/" data-testid="add-category-btn">
-            <Button className="bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-2xl px-6 py-3 h-auto font-semibold shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 transition-all">
-              <Plus className="w-4 h-4 mr-2" /> Add Category
-            </Button>
-          </Link>
+          <div className="flex items-center gap-3">
+            {/* Month picker */}
+            <select
+              className="text-sm bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-200 cursor-pointer"
+              value={`${selectedYear}-${selectedMonth}`}
+              onChange={(e) => {
+                const [y, m] = e.target.value.split('-').map(Number);
+                setSelectedYear(y);
+                setSelectedMonth(m);
+                setExpandedCards({});
+              }}
+              data-testid="month-picker"
+            >
+              {availableMonths.map((m) => (
+                <option key={`${m.year}-${m.month}`} value={`${m.year}-${m.month}`}>
+                  {m.label} ({m.count})
+                </option>
+              ))}
+            </select>
+            <Link to="/" data-testid="add-category-btn">
+              <Button className="bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-2xl px-6 py-3 h-auto font-semibold shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 transition-all">
+                <Plus className="w-4 h-4 mr-2" /> Add Category
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* OVERVIEW CARD */}
@@ -309,37 +340,40 @@ export default function Budgets() {
                 </button>
 
                 {/* Expense dropdown */}
-                {expandedCards[budget.category] && (
-                  <div className="mt-3 border-t border-slate-100 pt-3 space-y-1 max-h-52 overflow-y-auto" data-testid={`expense-list-${budget.category}`}>
-                    {(categoryExpenses[budget.category] || []).length > 0 ? (
-                      (categoryExpenses[budget.category] || []).slice(0, 20).map(exp => (
-                        <div key={exp.id} className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-slate-50 group text-xs">
-                          <div className="flex-1 min-w-0 mr-2">
-                            <p className="font-medium text-slate-800 truncate">{exp.description}</p>
-                            <p className="text-slate-400 text-[10px]">{exp.date}</p>
+                {expandedCards[budget.category] && (() => {
+                  const expenses = getCategoryExpenses(budget.category);
+                  return (
+                    <div className="mt-3 border-t border-slate-100 pt-3 space-y-1 max-h-52 overflow-y-auto" data-testid={`expense-list-${budget.category}`}>
+                      {expenses.length > 0 ? (
+                        expenses.slice(0, 20).map(exp => (
+                          <div key={exp.id} className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-slate-50 group text-xs">
+                            <div className="flex-1 min-w-0 mr-2">
+                              <p className="font-medium text-slate-800 truncate">{exp.description}</p>
+                              <p className="text-slate-400 text-[10px]">{exp.date}</p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="font-semibold text-slate-700">{formatCurrency(exp.amount)}</span>
+                              <button
+                                className="opacity-0 group-hover:opacity-100 transition-opacity text-rose-400 hover:text-rose-600 p-1 rounded"
+                                onClick={() => handleDeleteExpense(exp.id, budget.category)}
+                                data-testid={`delete-exp-${exp.id}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="font-semibold text-slate-700">{formatCurrency(exp.amount)}</span>
-                            <button
-                              className="opacity-0 group-hover:opacity-100 transition-opacity text-rose-400 hover:text-rose-600 p-1 rounded"
-                              onClick={() => handleDeleteExpense(exp.id, budget.category)}
-                              data-testid={`delete-exp-${exp.id}`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-slate-400 text-center py-3">No expenses in this category</p>
-                    )}
-                    {(categoryExpenses[budget.category] || []).length > 20 && (
-                      <p className="text-[10px] text-slate-400 text-center pt-1">
-                        Showing 20 of {(categoryExpenses[budget.category] || []).length}
-                      </p>
-                    )}
-                  </div>
-                )}
+                        ))
+                      ) : (
+                        <p className="text-xs text-slate-400 text-center py-3">No expenses in {periodLabel}</p>
+                      )}
+                      {expenses.length > 20 && (
+                        <p className="text-[10px] text-slate-400 text-center pt-1">
+                          Showing 20 of {expenses.length}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </Card>
             );
           })}
