@@ -176,11 +176,12 @@ export default function Budgets() {
             {/* Left: Overview stats */}
             <div>
               <p className="text-[11px] uppercase tracking-[0.2em] font-bold text-indigo-400 mb-3">Current Month Overview</p>
-              <div className="flex items-baseline gap-3 mb-6">
-                <p className="text-4xl md:text-5xl font-bold text-slate-900" data-testid="total-budget-limit">
-                  {formatCurrency(totalLimit)}
+              <div className="mb-1">
+                <p className="text-4xl md:text-5xl font-bold text-slate-900" data-testid="total-budget-spent">
+                  {formatCurrency(totalSpent)}
                 </p>
-                <span className="text-sm text-slate-500 font-medium">total limit</span>
+                <p className="text-sm text-slate-400 mt-1">spent of {formatCurrency(totalLimit)} limit</p>
+                <p className="text-sm text-slate-500 font-medium mt-0.5" data-testid="total-budget-left">{formatCurrency(totalLeft)} left</p>
               </div>
 
               {/* Usage bar */}
