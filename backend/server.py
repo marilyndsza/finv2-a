@@ -37,6 +37,20 @@ class DataStore:
     data_loaded: bool = False
 
     @classmethod
+    def assign_stable_ids(cls):
+        """Assign stable UUIDs to all rows that lack one. Call once after load."""
+        if cls.df_expenses is None or cls.df_expenses.empty:
+            return
+        if 'id' not in cls.df_expenses.columns:
+            cls.df_expenses['id'] = [str(uuid.uuid4()) for _ in range(len(cls.df_expenses))]
+        else:
+            mask = cls.df_expenses['id'].isna() | (cls.df_expenses['id'] == '')
+            cls.df_expenses.loc[mask, 'id'] = [str(uuid.uuid4()) for _ in range(mask.sum())]
+        if 'created_at' not in cls.df_expenses.columns:
+            cls.df_expenses['created_at'] = datetime.now(timezone.utc).isoformat()
+        logger.info(f"Stable IDs assigned to {len(cls.df_expenses)} expenses")
+
+    @classmethod
     def engine(cls) -> InsightsEngine:
         """Return a fresh InsightsEngine wired to current data."""
         return InsightsEngine(cls.df_expenses, cls.df_aggregated)
@@ -45,23 +59,22 @@ class DataStore:
     def get_expenses_list(cls) -> List[Dict]:
         if cls.df_expenses is None or cls.df_expenses.empty:
             return []
-        expenses = []
-        for _, row in cls.df_expenses.iterrows():
-            eid = row.get('id')
-            if pd.isna(eid) if isinstance(eid, float) else not eid:
-                eid = str(uuid.uuid4())
-            cat = row.get('created_at')
-            if pd.isna(cat) if isinstance(cat, float) else not cat:
-                cat = datetime.now(timezone.utc).isoformat()
-            expenses.append({
-                'id': str(eid),
-                'amount': float(row['amount']),
-                'category': str(row.get('category', 'Other')) if not (isinstance(row.get('category'), float) and pd.isna(row.get('category'))) else 'Other',
-                'description': str(row.get('description', 'Expense')) if not (isinstance(row.get('description'), float) and pd.isna(row.get('description'))) else 'Expense',
-                'date': str(row['date']),
-                'created_at': str(cat),
-            })
-        return expenses
+        cols = ['id', 'amount', 'category', 'description', 'date', 'created_at']
+        df = cls.df_expenses[cols].copy()
+        df['amount'] = df['amount'].astype(float)
+        df['category'] = df['category'].fillna('Other').astype(str)
+        df['description'] = df['description'].fillna('Expense').astype(str)
+        df['date'] = df['date'].astype(str)
+        df['created_at'] = df['created_at'].astype(str)
+        df['id'] = df['id'].astype(str)
+        return df.to_dict('records')
+
+    @classmethod
+    def get_expenses_by_category(cls, category: str) -> List[Dict]:
+        """Filter expenses by category (case-insensitive)."""
+        all_exp = cls.get_expenses_list()
+        cat_lower = category.lower()
+        return [e for e in all_exp if e.get('category', '').lower() == cat_lower]
 
     @classmethod
     def add_expense(cls, data: Dict) -> Dict:
@@ -72,7 +85,6 @@ class DataStore:
         if 'created_at' not in data:
             data['created_at'] = datetime.now(timezone.utc).isoformat()
         cls.df_expenses = pd.concat([cls.df_expenses, pd.DataFrame([data])], ignore_index=True)
-        # Rebuild aggregated
         cls._rebuild_aggregated()
         return data
 
@@ -81,8 +93,8 @@ class DataStore:
         if cls.df_expenses is None:
             return False
         before = len(cls.df_expenses)
-        mask = cls.df_expenses['id'].astype(str) == expense_id
-        cls.df_expenses = cls.df_expenses[~mask]
+        mask = cls.df_expenses['id'].astype(str) == str(expense_id)
+        cls.df_expenses = cls.df_expenses[~mask].reset_index(drop=True)
         deleted = len(cls.df_expenses) < before
         if deleted:
             cls._rebuild_aggregated()
@@ -169,14 +181,24 @@ async def get_expenses():
         'error': None,
     }
 
+@api_router.get("/expenses/category/{category}")
+async def get_expenses_by_category(category: str):
+    """Get all expenses for a specific category."""
+    expenses = DataStore.get_expenses_by_category(category)
+    return {
+        'data': expenses,
+        'metadata': {'category': category, 'count': len(expenses)},
+        'error': None,
+    }
+
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str):
     deleted = DataStore.delete_expense(expense_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Expense not found")
     return {
-        'data': {'deleted': True},
-        'metadata': {},
+        'data': {'deleted': True, 'id': expense_id},
+        'metadata': {'remaining_count': len(DataStore.df_expenses) if DataStore.df_expenses is not None else 0},
         'error': None,
     }
 
@@ -245,6 +267,9 @@ async def startup_event():
         DataStore.df_aggregated = df_aggregated
         DataStore.scaler = DataStore.loader.scaler
         DataStore.data_loaded = True
+
+        # Assign stable IDs so delete works
+        DataStore.assign_stable_ids()
 
         logger.info(f"Dataset loaded: {len(df_expenses)} expenses, {len(df_aggregated)} time periods")
         logger.info(f"Date range: {df_expenses['date'].min()} to {df_expenses['date'].max()}")

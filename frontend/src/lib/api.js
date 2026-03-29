@@ -87,3 +87,15 @@ export async function getAnomalies() {
     return { data: { alerts: [] }, metadata: {}, error: e.message };
   }
 }
+
+// ==================== Expenses by Category ====================
+
+export async function getExpensesByCategory(category) {
+  try {
+    const r = await axios.get(`${API}/expenses/category/${encodeURIComponent(category)}`);
+    return r.data?.data || [];
+  } catch (e) {
+    console.error('getExpensesByCategory error:', e);
+    return [];
+  }
+}

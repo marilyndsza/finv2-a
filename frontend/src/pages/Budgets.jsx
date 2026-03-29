@@ -10,7 +10,7 @@ import {
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import {
-  Plus, Sparkles, Pencil, AlertTriangle,
+  Plus, Sparkles, Pencil, AlertTriangle, ChevronDown, ChevronUp, Trash2,
   UtensilsCrossed, Bus, ShoppingBag, Tv, Zap,
   Heart, Home, GraduationCap, Plane, MoreHorizontal
 } from 'lucide-react';
@@ -58,6 +58,8 @@ export default function Budgets() {
   const [topInsight, setTopInsight] = useState(null);
   const [loading, setLoading] = useState(true);
   const [adjustDialog, setAdjustDialog] = useState({ open: false, category: '', limit: '' });
+  const [expandedCards, setExpandedCards] = useState({});
+  const [categoryExpenses, setCategoryExpenses] = useState({});
 
   useEffect(() => { loadData(); }, []);
 
@@ -87,6 +89,34 @@ export default function Budgets() {
 
   // Computed totals from backend data
   const totalLimit = budgets.reduce((s, b) => s + (b.limit || 0), 0);
+
+  async function toggleCategory(category) {
+    const isOpen = expandedCards[category];
+    if (isOpen) {
+      setExpandedCards(prev => ({ ...prev, [category]: false }));
+      return;
+    }
+    // Fetch expenses for this category
+    const expenses = await api.getExpensesByCategory(category);
+    setCategoryExpenses(prev => ({ ...prev, [category]: expenses }));
+    setExpandedCards(prev => ({ ...prev, [category]: true }));
+  }
+
+  async function handleDeleteExpense(id, category) {
+    try {
+      await api.deleteExpense(id);
+      toast.success('Expense deleted');
+      // Remove from local dropdown state
+      setCategoryExpenses(prev => ({
+        ...prev,
+        [category]: (prev[category] || []).filter(e => e.id !== id)
+      }));
+      // Re-fetch budgets + analytics to sync totals
+      await loadData();
+    } catch (err) {
+      toast.error('Failed to delete expense');
+    }
+  }
   const totalSpent = budgets.reduce((s, b) => s + (b.current || 0), 0);
   const totalLeft = Math.max(0, totalLimit - totalSpent);
   const utilizationPct = totalLimit > 0 ? (totalSpent / totalLimit) * 100 : 0;
@@ -241,7 +271,7 @@ export default function Budgets() {
                 </div>
 
                 {/* Spent + status */}
-                <div className="flex items-center justify-between mt-auto">
+                <div className="flex items-center justify-between">
                   <div>
                     {isOver ? (
                       <>
@@ -265,6 +295,52 @@ export default function Budgets() {
                     {status.label}
                   </span>
                 </div>
+
+                {/* Expand/Collapse toggle */}
+                <button
+                  className="mt-4 flex items-center justify-center gap-1 text-[11px] text-indigo-500 font-semibold uppercase tracking-wider hover:text-indigo-700 transition-colors w-full py-2 rounded-xl hover:bg-indigo-50"
+                  onClick={() => toggleCategory(budget.category)}
+                  data-testid={`toggle-expenses-${budget.category}`}
+                >
+                  {expandedCards[budget.category] ? (
+                    <><ChevronUp className="w-3.5 h-3.5" /> Hide Expenses</>
+                  ) : (
+                    <><ChevronDown className="w-3.5 h-3.5" /> Show Expenses</>
+                  )}
+                </button>
+
+                {/* Expense dropdown */}
+                {expandedCards[budget.category] && (
+                  <div className="mt-3 border-t border-slate-100 pt-3 space-y-1 max-h-52 overflow-y-auto" data-testid={`expense-list-${budget.category}`}>
+                    {(categoryExpenses[budget.category] || []).length > 0 ? (
+                      (categoryExpenses[budget.category] || []).slice(0, 20).map(exp => (
+                        <div key={exp.id} className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-slate-50 group text-xs">
+                          <div className="flex-1 min-w-0 mr-2">
+                            <p className="font-medium text-slate-800 truncate">{exp.description}</p>
+                            <p className="text-slate-400 text-[10px]">{exp.date}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className="font-semibold text-slate-700">{formatCurrency(exp.amount)}</span>
+                            <button
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-rose-400 hover:text-rose-600 p-1 rounded"
+                              onClick={() => handleDeleteExpense(exp.id, budget.category)}
+                              data-testid={`delete-exp-${exp.id}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-400 text-center py-3">No expenses in this category</p>
+                    )}
+                    {(categoryExpenses[budget.category] || []).length > 20 && (
+                      <p className="text-[10px] text-slate-400 text-center pt-1">
+                        Showing 20 of {(categoryExpenses[budget.category] || []).length}
+                      </p>
+                    )}
+                  </div>
+                )}
               </Card>
             );
           })}

@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 
 class FinFusionAPITester:
-    def __init__(self, base_url="https://1f4c8a69-bcfb-443f-9b04-659d348f5e39.preview.emergentagent.com"):
+    def __init__(self, base_url="https://fin-structure-audit.preview.emergentagent.com"):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.tests_run = 0
@@ -312,6 +312,153 @@ class FinFusionAPITester:
             validate_create_response
         )
 
+    def test_stable_expense_ids(self):
+        """Test that expense IDs are stable across multiple GET calls"""
+        # First call
+        success1, response1 = self.run_test(
+            "Get Expenses (First Call)",
+            "GET",
+            "expenses",
+            200,
+            validate_response=self.validate_expenses_response
+        )
+        
+        if not success1:
+            return False, {}
+        
+        # Second call
+        success2, response2 = self.run_test(
+            "Get Expenses (Second Call)",
+            "GET", 
+            "expenses",
+            200,
+            validate_response=self.validate_expenses_response
+        )
+        
+        if not success2:
+            return False, {}
+        
+        # Compare IDs
+        ids1 = [exp['id'] for exp in response1.get('data', [])]
+        ids2 = [exp['id'] for exp in response2.get('data', [])]
+        
+        if ids1 != ids2:
+            self.log_test("Stable Expense IDs", False, f"IDs changed between calls: {len(ids1)} vs {len(ids2)} items")
+            return False, {}
+        
+        self.log_test("Stable Expense IDs", True, f"IDs are stable across calls ({len(ids1)} expenses)")
+        return True, response1
+
+    def test_expenses_by_category(self, category):
+        """Test getting expenses by category"""
+        def validate_category_response(response):
+            if not isinstance(response, dict):
+                return False, "Response is not a dictionary"
+            
+            if 'data' not in response:
+                return False, "Missing 'data' field in response"
+            
+            data = response['data']
+            if not isinstance(data, list):
+                return False, "Data is not a list"
+            
+            # Check that all expenses belong to the requested category
+            for expense in data:
+                if expense.get('category', '').lower() != category.lower():
+                    return False, f"Found expense with wrong category: {expense.get('category')} (expected {category})"
+            
+            return True, f"Found {len(data)} expenses in {category} category"
+        
+        return self.run_test(
+            f"Get {category} Expenses",
+            "GET",
+            f"expenses/category/{category}",
+            200,
+            validate_response=validate_category_response
+        )
+
+    def test_delete_expense_workflow(self):
+        """Test complete delete workflow: create -> verify -> delete -> verify deletion"""
+        # Step 1: Create a test expense
+        test_expense = {
+            "amount": 99.99,
+            "category": "Transport",
+            "description": "Test expense for deletion",
+            "date": datetime.now().strftime("%Y-%m-%d")
+        }
+        
+        success, created_expense = self.test_create_expense()
+        if not success or not created_expense.get('id'):
+            self.log_test("Delete Workflow - Create", False, "Failed to create test expense")
+            return False
+        
+        expense_id = created_expense['id']
+        
+        # Step 2: Verify expense exists in list
+        success, expenses_response = self.run_test(
+            "Delete Workflow - Verify Creation",
+            "GET",
+            "expenses",
+            200,
+            validate_response=self.validate_expenses_response
+        )
+        
+        if not success:
+            return False
+        
+        expense_ids = [exp['id'] for exp in expenses_response.get('data', [])]
+        if expense_id not in expense_ids:
+            self.log_test("Delete Workflow - Verify Creation", False, f"Created expense {expense_id} not found in list")
+            return False
+        
+        # Step 3: Delete the expense
+        def validate_delete_response(response):
+            if not isinstance(response, dict):
+                return False, "Response is not a dictionary"
+            
+            if 'data' not in response:
+                return False, "Missing 'data' field in response"
+            
+            data = response['data']
+            if not data.get('deleted'):
+                return False, "Delete operation not confirmed"
+            
+            if data.get('id') != expense_id:
+                return False, f"Wrong expense ID in delete response: {data.get('id')} vs {expense_id}"
+            
+            return True, f"Expense {expense_id} deleted successfully"
+        
+        success = self.run_test(
+            "Delete Workflow - Delete",
+            "DELETE",
+            f"expenses/{expense_id}",
+            200,
+            validate_response=validate_delete_response
+        )
+        
+        if not success:
+            return False
+        
+        # Step 4: Verify expense is removed from list
+        success, final_expenses = self.run_test(
+            "Delete Workflow - Verify Deletion",
+            "GET",
+            "expenses",
+            200,
+            validate_response=self.validate_expenses_response
+        )
+        
+        if not success:
+            return False
+        
+        final_expense_ids = [exp['id'] for exp in final_expenses.get('data', [])]
+        if expense_id in final_expense_ids:
+            self.log_test("Delete Workflow - Verify Deletion", False, f"Deleted expense {expense_id} still found in list")
+            return False
+        
+        self.log_test("Delete Workflow - Complete", True, f"Expense {expense_id} successfully deleted and removed from list")
+        return True
+
     def run_all_tests(self):
         """Run all API tests"""
         print("=" * 60)
@@ -329,14 +476,8 @@ class FinFusionAPITester:
             validate_response=self.validate_health_response
         )
 
-        # Test 2: Get Expenses
-        self.run_test(
-            "Get Expenses",
-            "GET",
-            "expenses",
-            200,
-            validate_response=self.validate_expenses_response
-        )
+        # Test 2: Get Expenses with Stable IDs
+        self.test_stable_expense_ids()
 
         # Test 3: Analytics Spending
         self.run_test(
@@ -383,17 +524,31 @@ class FinFusionAPITester:
             validate_response=self.validate_anomalies_response
         )
 
-        # Test 8: Create Expense (POST)
+        # Test 8: Category-specific expenses
+        self.test_expenses_by_category("Food")
+        self.test_expenses_by_category("Rent")
+
+        # Test 9: Complete delete workflow
+        self.test_delete_expense_workflow()
+
+        # Test 10: Create and verify expense appears in list
         success, created_expense = self.test_create_expense()
-        
-        # Test 9: Delete Expense (if creation was successful)
         if success and created_expense.get('id'):
-            self.run_test(
-                "Delete Expense",
-                "DELETE",
-                f"expenses/{created_expense['id']}",
-                200
+            # Verify the created expense appears in the main list
+            success, expenses_response = self.run_test(
+                "Verify Created Expense in List",
+                "GET",
+                "expenses",
+                200,
+                validate_response=self.validate_expenses_response
             )
+            
+            if success:
+                expense_ids = [exp['id'] for exp in expenses_response.get('data', [])]
+                if created_expense['id'] in expense_ids:
+                    self.log_test("Created Expense Appears in List", True, f"Expense {created_expense['id']} found in list")
+                else:
+                    self.log_test("Created Expense Appears in List", False, f"Expense {created_expense['id']} not found in list")
 
         # Print Results
         print()
